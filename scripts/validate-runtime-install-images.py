@@ -61,6 +61,43 @@ def main():
         manifest_text.count("chroot /host /usr/bin/nsenter") == 2,
         "installer manifests must run host mutations through host nsenter from the mounted node root",
     )
+    require(
+        manifest_text.count("mountPath: /host") == 2 and manifest_text.count("path: /") >= 2,
+        "installer manifests that chroot into /host must mount the node root at /host",
+    )
+    require(
+        '[plugins.\\"io.containerd.cri.v1.runtime\\".containerd.runtimes.runsc]' in manifest_text,
+        "gVisor installer must configure runsc for the containerd 2.x CRI runtime plugin",
+    )
+    require(
+        '[plugins.\\"io.containerd.grpc.v1.cri\\".containerd.runtimes.runsc]' not in manifest_text,
+        "gVisor installer must not use the legacy containerd 1.x CRI runtime plugin path",
+    )
+    require(
+        'import_path=\'"/etc/containerd/conf.d/*.toml"\'' in manifest_text,
+        "gVisor installer must enable containerd conf.d imports when the AKS node config omits them",
+    )
+    require(
+        'line=$0' in manifest_text and 'lines[NR]=line' in manifest_text,
+        "gVisor installer must merge conf.d into existing containerd imports instead of only adding imports when absent",
+    )
+    require(
+        'ensure_containerd_conf_import "${firecracker_nodepool_name}"' in Path("scripts/bootstrap-cluster.sh").read_text(encoding="utf-8"),
+        "bootstrap must preserve /etc/containerd/conf.d imports after Kata Deploy updates containerd imports",
+    )
+    require(
+        'get pods -l "$selector"' in Path("scripts/bootstrap-cluster.sh").read_text(encoding="utf-8"),
+        "bootstrap must enumerate every installer pod before repairing node-local containerd imports",
+    )
+    require(
+        'line=$0' in Path("scripts/bootstrap-cluster.sh").read_text(encoding="utf-8")
+        and 'lines[NR]=line' in Path("scripts/bootstrap-cluster.sh").read_text(encoding="utf-8"),
+        "bootstrap must merge conf.d into existing containerd imports instead of appending a possibly nested TOML key",
+    )
+    require(
+        'exec -i "pod/$pod"' in Path("scripts/bootstrap-cluster.sh").read_text(encoding="utf-8"),
+        "bootstrap must pass stdin to kubectl exec for each pod receiving the containerd import repair script",
+    )
 
 
 if __name__ == "__main__":

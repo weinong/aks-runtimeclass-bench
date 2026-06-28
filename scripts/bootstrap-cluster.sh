@@ -49,6 +49,60 @@ wait_for_pod_succeeded() {
   run_cmd kubectl "${kubectl_args[@]}" -n "$namespace" wait --for=jsonpath='{.status.phase}'=Succeeded "pod/$pod" --timeout "$timeout"
 }
 
+ensure_containerd_conf_import() {
+  local nodepool_name=$1
+  local namespace=$2
+  local selector=$3
+  local pod
+  local pods
+
+  log "Ensuring containerd imports /etc/containerd/conf.d on node pool $nodepool_name"
+  print_cmd kubectl "${kubectl_args[@]}" -n "$namespace" get pods -l "$selector" -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}'
+  if ! is_true "${DRY_RUN:-0}"; then
+    pods=$(kubectl "${kubectl_args[@]}" -n "$namespace" get pods -l "$selector" -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}')
+    [[ -n "$pods" ]] || die "no pods found for selector $selector in namespace $namespace"
+  else
+    pods='<runtime-installer-pod>'
+  fi
+
+  while IFS= read -r pod; do
+    [[ -n "$pod" ]] || continue
+    print_cmd kubectl "${kubectl_args[@]}" -n "$namespace" exec -i "pod/$pod" -- chroot /host sh -seu '...'
+    if is_true "${DRY_RUN:-0}"; then
+      continue
+    fi
+    kubectl "${kubectl_args[@]}" -n "$namespace" exec -i "pod/$pod" -- chroot /host sh -seu <<'EOF'
+import_path='"/etc/containerd/conf.d/*.toml"'
+if ! grep -Fq "$import_path" /etc/containerd/config.toml; then
+  tmp="/etc/containerd/config.toml.tmp"
+  awk -v import_path="$import_path" '
+    /^imports[[:space:]]*=/ {
+      sub(/\[/, "[" import_path ", ");
+      inserted=1;
+    }
+    /^version[[:space:]]*=/ { version_line=NR }
+    /^\[/ && !first_table { first_table=NR }
+    { line=$0; lines[NR]=line }
+    END {
+      insert_after = version_line ? version_line : first_table - 1;
+      for (i = 1; i <= NR; i++) {
+        print lines[i];
+        if (!inserted && i == insert_after) {
+          print "imports = [" import_path "]";
+        }
+      }
+      if (!inserted && !insert_after) {
+        print "imports = [" import_path "]";
+      }
+    }
+  ' /etc/containerd/config.toml > "$tmp"
+  mv "$tmp" /etc/containerd/config.toml
+  systemctl restart containerd
+fi
+EOF
+  done <<< "$pods"
+}
+
 verify_runtime_class_exists() {
   local name=$1
   [[ -n "$name" ]] || return 0
@@ -135,6 +189,7 @@ install_firecracker() {
     helm "${helm_args[@]}" upgrade --install kata-deploy-fc "$kata_deploy_chart" --namespace kata-system --create-namespace --values "$values_file"
     rm -f "$values_file"
     run_cmd kubectl "${kubectl_args[@]}" -n kata-system rollout status daemonset/kata-deploy --timeout=20m
+    ensure_containerd_conf_import "${firecracker_nodepool_name}" runtimeclass-firecracker app.kubernetes.io/name=firecracker-devmapper-installer
   fi
 
   apply_rendered_manifest "$REPO_ROOT/configs/runtime-install/firecracker/pre-pull.yaml"

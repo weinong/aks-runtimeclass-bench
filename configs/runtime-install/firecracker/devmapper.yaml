@@ -62,3 +62,10 @@ spec:
                 systemctl restart containerd
               '
               sleep infinity
+          volumeMounts:
+            - name: host-root
+              mountPath: /host
+      volumes:
+        - name: host-root
+          hostPath:
+            path: /

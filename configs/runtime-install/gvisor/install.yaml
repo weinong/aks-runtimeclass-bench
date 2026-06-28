@@ -39,18 +39,44 @@ spec:
             - /bin/sh
             - -ceu
             - |
-              chroot /host /usr/bin/nsenter --target 1 --mount --uts --ipc --net --pid -- sh -ceu '
+              chroot /host /usr/bin/nsenter --target 1 --mount --uts --ipc --net --pid -- sh -seu <<'HOST_SCRIPT'
                 command -v curl >/dev/null 2>&1 || { echo "curl is required to install gVisor binaries" >&2; exit 1; }
                 curl -fsSL -o /usr/local/bin/runsc https://storage.googleapis.com/gvisor/releases/release/latest/x86_64/runsc
                 curl -fsSL -o /usr/local/bin/containerd-shim-runsc-v1 https://storage.googleapis.com/gvisor/releases/release/latest/x86_64/containerd-shim-runsc-v1
                 chmod 0755 /usr/local/bin/runsc /usr/local/bin/containerd-shim-runsc-v1
                 mkdir -p /etc/containerd/conf.d
+                import_path='"/etc/containerd/conf.d/*.toml"'
+                if ! grep -Fq "$import_path" /etc/containerd/config.toml; then
+                  tmp="/etc/containerd/config.toml.tmp"
+                  awk -v import_path="$import_path" '
+                    /^imports[[:space:]]*=/ {
+                      sub(/\[/, "[" import_path ", ");
+                      inserted=1;
+                    }
+                    /^version[[:space:]]*=/ { version_line=NR }
+                    /^\[/ && !first_table { first_table=NR }
+                    { line=$0; lines[NR]=line }
+                    END {
+                      insert_after = version_line ? version_line : first_table - 1;
+                      for (i = 1; i <= NR; i++) {
+                        print lines[i];
+                        if (!inserted && i == insert_after) {
+                          print "imports = [" import_path "]";
+                        }
+                      }
+                      if (!inserted && !insert_after) {
+                        print "imports = [" import_path "]";
+                      }
+                    }
+                  ' /etc/containerd/config.toml > "$tmp"
+                  mv "$tmp" /etc/containerd/config.toml
+                fi
                 printf "%s\n" \
-                  "[plugins.\"io.containerd.grpc.v1.cri\".containerd.runtimes.runsc]" \
+                  "[plugins.\"io.containerd.cri.v1.runtime\".containerd.runtimes.runsc]" \
                   "  runtime_type = \"io.containerd.runsc.v1\"" \
                   >/etc/containerd/conf.d/99-runsc.toml
                 systemctl restart containerd
-              '
+              HOST_SCRIPT
               sleep infinity
           volumeMounts:
             - name: host-root
