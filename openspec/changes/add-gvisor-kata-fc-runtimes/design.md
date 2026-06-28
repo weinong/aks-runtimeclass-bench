@@ -86,5 +86,5 @@ Rollback for a failed runtime installation is to delete the installer namespaces
 
 ## Open Questions
 
-- Should Firecracker pre-pull include only the benchmark pause image, or also keep the upstream `python:3.12-slim` smoke image for optional manual testing?
+- Should Firecracker pre-pull include only the benchmark pause image, or also keep the Azure Linux Python smoke image for optional manual testing?
 - Should bootstrap run smoke pods for gVisor and Firecracker, or is RuntimeClass existence plus installer rollout enough for the default benchmark flow?

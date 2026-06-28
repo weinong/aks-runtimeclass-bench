@@ -53,7 +53,7 @@ RUN_ID ?= runtimeclass-$(shell date -u +%Y%m%dT%H%M%SZ)
 CSV_OUTPUT ?= true
 DRY_RUN ?= 0
 
-.PHONY: help cluster-create bootstrap-cluster cluster-delete kube-burner-install benchmark benchmark-dry-run validate validate-make validate-shell validate-config test-extract validate-benchmark-baseline clean-results
+.PHONY: help cluster-create bootstrap-cluster cluster-delete kube-burner-install benchmark benchmark-dry-run validate validate-make validate-shell validate-config validate-runtime-install-images test-extract validate-benchmark-baseline clean-results
 
 help:
 	@printf 'AKS runtime class benchmark targets:\n'
@@ -86,7 +86,7 @@ benchmark:
 benchmark-dry-run:
 	@$(MAKE) benchmark DRY_RUN=1
 
-validate: validate-make validate-shell validate-config test-extract validate-benchmark-baseline
+validate: validate-make validate-shell validate-config validate-runtime-install-images test-extract validate-benchmark-baseline
 
 validate-make:
 	@$(MAKE) --dry-run help >/dev/null
@@ -102,6 +102,9 @@ validate-config:
 	@test -s $(KUBE_BURNER_CONFIG)
 	@test -s $(RUNTIME_MANIFEST)
 	@test -s $(POD_TEMPLATE)
+
+validate-runtime-install-images:
+	@python3 scripts/validate-runtime-install-images.py
 
 test-extract:
 	@mkdir -p results/validation

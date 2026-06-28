@@ -25,25 +25,25 @@ spec:
       restartPolicy: Always
       containers:
         - name: installer
-          image: ubuntu:22.04
+          image: mcr.microsoft.com/azurelinux/busybox:1.36
           imagePullPolicy: IfNotPresent
           securityContext:
             privileged: true
           command:
-            - /bin/bash
+            - /bin/sh
             - -ceu
             - |
-              nsenter --target 1 --mount --uts --ipc --net --pid -- bash -ceu '
+              chroot /host /usr/bin/nsenter --target 1 --mount --uts --ipc --net --pid -- sh -ceu '
                 command -v dmsetup >/dev/null 2>&1 || { echo "dmsetup is required to configure the devmapper thin pool" >&2; exit 1; }
                 mkdir -p /var/lib/containerd/devmapper
                 truncate -s 100G /var/lib/containerd/devmapper/data
                 truncate -s 2G /var/lib/containerd/devmapper/meta
                 data_loop=$(losetup -j /var/lib/containerd/devmapper/data | cut -d: -f1 | head -n1)
                 meta_loop=$(losetup -j /var/lib/containerd/devmapper/meta | cut -d: -f1 | head -n1)
-                if [[ -z "$data_loop" ]]; then
+                if [ -z "$data_loop" ]; then
                   data_loop=$(losetup --find --show /var/lib/containerd/devmapper/data)
                 fi
-                if [[ -z "$meta_loop" ]]; then
+                if [ -z "$meta_loop" ]; then
                   meta_loop=$(losetup --find --show /var/lib/containerd/devmapper/meta)
                 fi
                 if ! dmsetup info containerd-pool >/dev/null 2>&1; then
