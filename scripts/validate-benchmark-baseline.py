@@ -45,11 +45,21 @@ def assert_aggregate_summary(run_dir, expected_runtimes):
     require(row_keys == set(expected_runtimes), f"aggregate CSV runtime keys are {row_keys!r}, expected {set(expected_runtimes)!r}")
 
 
+def assert_runtime_manifest(path, expected_runtimes):
+    manifest = read_json(path)
+    runtimes = manifest.get("runtimes")
+    require(isinstance(runtimes, list), f"{path} must contain a runtimes array")
+    actual = {runtime.get("key"): runtime.get("runtimeClass") for runtime in runtimes}
+    require(actual == expected_runtimes, f"runtime manifest is {actual!r}, expected {expected_runtimes!r}")
+
+
 def main():
     parser = argparse.ArgumentParser(description="Validate benchmark baseline dry-run and summary outputs")
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--run-id", required=True)
     parser.add_argument("--pod-template", type=Path, default=Path("templates/runtimeclass-pod.yml"))
+    parser.add_argument("--suite-config", type=Path, default=Path("configs/kube-burner-runtimeclass-suite.yml"))
+    parser.add_argument("--source-manifest", type=Path, default=Path("configs/runtime-manifest.json"))
     args = parser.parse_args()
 
     run_dir = args.output_dir / args.run_id
@@ -63,9 +73,15 @@ def main():
 
     rendered_config = run_dir / "kube-burner.yml"
     runtime_manifest = run_dir / "runtime-manifest.json"
+    require(args.suite_config.is_file(), f"missing file: {args.suite_config}")
+    require(args.source_manifest.is_file(), f"missing file: {args.source_manifest}")
     require(rendered_config.is_file(), f"missing file: {rendered_config}")
     require(runtime_manifest.is_file(), f"missing file: {runtime_manifest}")
+    source_config_text = args.suite_config.read_text(encoding="utf-8")
+    require("__METRICS_DIR__" in source_config_text, "static suite config must include the metrics directory placeholder")
     config_text = rendered_config.read_text(encoding="utf-8")
+    require("__METRICS_DIR__" not in config_text, "prepared config must replace the metrics directory placeholder")
+    require(str(run_dir / "raw") in config_text, "prepared config must include the run raw metrics directory")
     require("name: runtimeclass-pod-latency-standard" in config_text, "config must include standard job")
     require("name: runtimeclass-pod-latency-kata" in config_text, "config must include Kata job")
     require('runtimeClass: ""' in config_text, "standard job must leave runtimeClass empty")
@@ -73,6 +89,9 @@ def main():
     require('runtimeclass: "kata"' in config_text, "Kata job must include node selector")
     require('key: "runtimeclass"' in config_text, "Kata job must include toleration")
     require("runtimeClassName" not in config_text, "rendered config should not contain pod runtimeClassName directly")
+
+    assert_runtime_manifest(args.source_manifest, expected_runtimes)
+    assert_runtime_manifest(runtime_manifest, expected_runtimes)
 
     template_text = args.pod_template.read_text(encoding="utf-8")
     require(

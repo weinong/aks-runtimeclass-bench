@@ -45,41 +45,41 @@ The benchmark suite SHALL provide a Make target that installs kube-burner into a
 - **THEN** the requested kube-burner version is downloaded or installed locally and the benchmark run target can invoke it without requiring a global installation
 
 ### Requirement: Configurable runtime class workload
-The kube-burner workload SHALL create pods from a pod spec whose runtime class and placement settings are selected from the configured benchmark runtime inventory at benchmark execution time.
+The kube-burner workload SHALL create pods from a checked-in static suite config whose runtime class and placement settings are visible in repository-managed configuration before benchmark execution.
 
 #### Scenario: Run benchmark for configured runtime classes
-- **WHEN** an operator runs the benchmark target with the default runtime inventory
-- **THEN** kube-burner creates benchmark pods for each configured runtime class with `runtimeClassName`, node selector, and tolerations rendered from that runtime entry
+- **WHEN** an operator runs the benchmark target with the repository-managed static suite config
+- **THEN** kube-burner creates benchmark pods for each configured runtime class with `runtimeClassName`, node selector, and tolerations defined by that checked-in suite config
 
 #### Scenario: Run benchmark for standard runtime
-- **WHEN** an operator runs the benchmark target with the default runtime inventory
-- **THEN** kube-burner creates a standard runtime benchmark entry without a `runtimeClassName` field and with the standard runtime placement settings
+- **WHEN** an operator runs the benchmark target with the repository-managed static suite config
+- **THEN** kube-burner creates a standard runtime benchmark entry without a `runtimeClassName` field and with the standard runtime placement settings defined by that checked-in suite config
 
 ### Requirement: Benchmark execution target
-The benchmark suite SHALL provide a Make target that runs kube-burner against the AKS cluster under test for every enabled runtime entry in one benchmark invocation.
+The benchmark suite SHALL provide a Make target that runs kube-burner against the AKS cluster under test using a repository-managed static suite config for every runtime entry in one benchmark invocation.
 
 #### Scenario: Run kube-burner benchmark suite
 - **WHEN** an operator runs the benchmark Make target after cluster credentials are configured
-- **THEN** the suite generates a kube-burner config with one job per enabled runtime entry and invokes kube-burner once with that config
+- **THEN** the suite copies or prepares the checked-in kube-burner config for the invocation and invokes kube-burner once with that config
 
 ### Requirement: Default runtime baseline benchmark execution
-The benchmark suite SHALL include the default Kubernetes runtime as the automatic first benchmark entry and SHALL run all configured runtime class entries in the same benchmark invocation.
+The benchmark suite SHALL include the default Kubernetes runtime as a static benchmark entry and SHALL run the checked-in runtime class entries in the same benchmark invocation.
 
 #### Scenario: Run all configured runtimes by default
-- **WHEN** an operator runs the benchmark target without specifying `RUNTIME_CLASS`, `NODE_SELECTOR`, or `TOLERATIONS_JSON`
-- **THEN** the suite runs the default-runtime baseline and each configured runtime class benchmark exactly once
+- **WHEN** an operator runs the benchmark target without modifying the repository-managed static suite config
+- **THEN** the suite runs the default-runtime baseline and each checked-in runtime class benchmark exactly once
 
 #### Scenario: Keep benchmark invocation output together
-- **WHEN** the benchmark target runs the default baseline and configured runtime class benchmarks
-- **THEN** the suite writes the generated kube-burner config, runtime manifest, raw metrics, and combined summaries under one result root for the invocation
+- **WHEN** the benchmark target runs the default baseline and checked-in runtime class benchmarks
+- **THEN** the suite writes the kube-burner config used for the invocation, runtime manifest, raw metrics, and combined summaries under one result root for the invocation
 
 #### Scenario: Label baseline summaries
 - **WHEN** the default-runtime baseline summary is extracted
 - **THEN** the suite labels the runtime class value as `standard`
 
 #### Scenario: Support future runtime entries
-- **WHEN** a new runtime entry is added to the benchmark runtime inventory with runtime class and placement settings
-- **THEN** the benchmark target includes that runtime entry without requiring new benchmark control-flow branches
+- **WHEN** a new runtime entry is added to the benchmark suite
+- **THEN** the runtime entry is added by changing the repository-managed static suite config and aligned runtime manifest rather than by adding benchmark control-flow branches or runtime generation logic
 
 ### Requirement: Pod latency metrics
 The benchmark suite SHALL record kube-burner `podLatency` P50, P95, and P99 values for `PodScheduled`, `PodReadyToStartContainers`, `ContainersStarted`, `ContainersReady`, and `Ready`.

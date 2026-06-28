@@ -1,0 +1,12 @@
+{
+  "runtimes": [
+    {
+      "key": "standard",
+      "runtimeClass": "standard"
+    },
+    {
+      "key": "kata",
+      "runtimeClass": "kata-vm-isolation"
+    }
+  ]
+}

@@ -10,6 +10,9 @@ run_dir="$REPO_ROOT/${OUTPUT_DIR:-results}/$requested_run_id"
 raw_dir="$run_dir/raw"
 rendered_config="$run_dir/kube-burner.yml"
 runtime_manifest="$run_dir/runtime-manifest.json"
+suite_config="$REPO_ROOT/${KUBE_BURNER_CONFIG:-configs/kube-burner-runtimeclass-suite.yml}"
+suite_manifest="$REPO_ROOT/${RUNTIME_MANIFEST:-configs/runtime-manifest.json}"
+metrics_placeholder="__METRICS_DIR__"
 
 resolve_kube_burner() {
   local repo_kube_burner="$REPO_ROOT/${TOOLS_DIR:-tools}/bin/kube-burner"
@@ -35,8 +38,16 @@ if ! is_true "${DRY_RUN:-0}"; then
   fi
 fi
 
-METRICS_DIR="$raw_dir" "$SCRIPT_DIR/render-kube-burner-config.py" --runtime-manifest "$runtime_manifest" > "$rendered_config"
-log "Rendered kube-burner config to $rendered_config"
+[[ -f "$suite_config" ]] || die "kube-burner suite config not found: $suite_config"
+[[ -f "$suite_manifest" ]] || die "runtime manifest not found: $suite_manifest"
+
+config_text=$(<"$suite_config")
+if [[ "$config_text" != *"$metrics_placeholder"* ]]; then
+  die "kube-burner suite config must contain metrics directory placeholder: $metrics_placeholder"
+fi
+printf '%s' "${config_text//$metrics_placeholder/$raw_dir}" > "$rendered_config"
+cp "$suite_manifest" "$runtime_manifest"
+log "Prepared kube-burner config from $suite_config at $rendered_config"
 
 kube_burner=$(resolve_kube_burner)
 cmd=("$kube_burner" init

@@ -1,0 +1,65 @@
+metricsEndpoints:
+  - indexer:
+      type: local
+      metricsDirectory: "__METRICS_DIR__"
+      createTarball: false
+global:
+  gc: true
+  measurements:
+    - name: podLatency
+jobs:
+  - name: runtimeclass-pod-latency-standard
+    jobIterations: 35
+    qps: 20
+    burst: 20
+    namespace: "runtimeclass-bench-standard"
+    namespacedIterations: false
+    cleanup: true
+    waitWhenFinished: true
+    podWait: true
+    objects:
+      - objectTemplate: "templates/runtimeclass-pod.yml"
+        replicas: 1
+        inputVars:
+          runtimeKey: "standard"
+          runtimeClass: ""
+          containerImage: "mcr.microsoft.com/oss/v2/kubernetes/pause:3.10.2"
+          command:
+            []
+          cpuRequest: "10m"
+          memoryRequest: "32Mi"
+          cpuLimit: "100m"
+          memoryLimit: "128Mi"
+          nodeSelector:
+            {}
+          tolerations:
+            []
+  - name: runtimeclass-pod-latency-kata
+    jobIterations: 35
+    qps: 20
+    burst: 20
+    namespace: "runtimeclass-bench-kata"
+    namespacedIterations: false
+    cleanup: true
+    waitWhenFinished: true
+    podWait: true
+    objects:
+      - objectTemplate: "templates/runtimeclass-pod.yml"
+        replicas: 1
+        inputVars:
+          runtimeKey: "kata"
+          runtimeClass: "kata-vm-isolation"
+          containerImage: "mcr.microsoft.com/oss/v2/kubernetes/pause:3.10.2"
+          command:
+            []
+          cpuRequest: "10m"
+          memoryRequest: "32Mi"
+          cpuLimit: "100m"
+          memoryLimit: "128Mi"
+          nodeSelector:
+            runtimeclass: "kata"
+          tolerations:
+            - effect: "NoSchedule"
+              key: "runtimeclass"
+              operator: "Equal"
+              value: "kata"

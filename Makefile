@@ -41,26 +41,8 @@ TOOLS_DIR ?= tools
 
 # Benchmark workload configuration.
 POD_TEMPLATE ?= templates/runtimeclass-pod.yml
-BENCHMARK_RUNTIMES ?= standard kata
-RUNTIME_CLASS ?=
-NODE_SELECTOR ?=
-TOLERATIONS_JSON ?= []
-BASELINE_NODE_SELECTOR ?=
-BASELINE_TOLERATIONS_JSON ?= []
-POD_COUNT ?= 35
-POD_REPLICAS ?= 1
-POD_IMAGE ?= mcr.microsoft.com/oss/v2/kubernetes/pause:3.10.2
-POD_COMMAND_JSON ?= []
-POD_CPU_REQUEST ?= 10m
-POD_MEMORY_REQUEST ?= 32Mi
-POD_CPU_LIMIT ?= 100m
-POD_MEMORY_LIMIT ?= 128Mi
-BENCHMARK_NAMESPACE ?= runtimeclass-bench
-BENCHMARK_QPS ?= 20
-BENCHMARK_BURST ?= 20
-BENCHMARK_CLEANUP ?= true
-BENCHMARK_WAIT_WHEN_FINISHED ?= true
-BENCHMARK_POD_WAIT ?= true
+KUBE_BURNER_CONFIG ?= configs/kube-burner-runtimeclass-suite.yml
+RUNTIME_MANIFEST ?= configs/runtime-manifest.json
 BENCHMARK_TIMEOUT ?= 4h
 KUBE_CONTEXT ?=
 OUTPUT_DIR ?= results
@@ -76,11 +58,11 @@ help:
 	@printf '  make cluster-delete        Delete cluster or resource group resources\n'
 	@printf '  make kube-burner-install   Install kube-burner under $(TOOLS_DIR)/\n'
 	@printf '  make benchmark             Run kube-burner and extract JSON/CSV summaries\n'
-	@printf '  make benchmark-dry-run     Render benchmark inputs and print the commands\n'
-	@printf '  make validate              Run local syntax, rendering, and extractor checks\n'
+	@printf '  make benchmark-dry-run     Prepare benchmark inputs and print the commands\n'
+	@printf '  make validate              Run local syntax, config, and extractor checks\n'
 	@printf '\nCommon overrides:\n'
 	@printf '  RESOURCE_GROUP=%s CLUSTER_NAME=%s LOCATION=%s VM_SIZE=%s\n' '$(RESOURCE_GROUP)' '$(CLUSTER_NAME)' '$(LOCATION)' '$(VM_SIZE)'
-	@printf '  BENCHMARK_RUNTIMES=%s POD_COUNT=%s OUTPUT_DIR=%s\n' '$(BENCHMARK_RUNTIMES)' '$(POD_COUNT)' '$(OUTPUT_DIR)'
+	@printf '  KUBE_BURNER_CONFIG=%s RUNTIME_MANIFEST=%s OUTPUT_DIR=%s\n' '$(KUBE_BURNER_CONFIG)' '$(RUNTIME_MANIFEST)' '$(OUTPUT_DIR)'
 
 cluster-create:
 	@scripts/cluster-create.sh
@@ -109,9 +91,8 @@ validate-shell:
 
 validate-config:
 	@mkdir -p results/validation
-	@scripts/render-kube-burner-config.py --runtime-manifest results/validation/runtime-manifest.json > results/validation/kube-burner.yml
-	@test -s results/validation/kube-burner.yml
-	@test -s results/validation/runtime-manifest.json
+	@test -s $(KUBE_BURNER_CONFIG)
+	@test -s $(RUNTIME_MANIFEST)
 	@test -s $(POD_TEMPLATE)
 
 test-extract:
