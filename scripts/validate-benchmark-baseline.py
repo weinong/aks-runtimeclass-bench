@@ -65,6 +65,56 @@ def assert_runtime_manifest(path, expected_runtimes):
     require(actual == expected_runtimes, f"runtime manifest is {actual!r}, expected {expected_runtimes!r}")
 
 
+def assert_prometheus_inputs(manifest_path, metrics_profile_path, source_config_text, rendered_config_text, expected_endpoint):
+    required_metric_families = [
+        "kubelet_run_podsandbox_duration_seconds",
+        "kubelet_pod_start_sli_duration_seconds",
+        "kubelet_pod_start_total_duration_seconds",
+    ]
+
+    require(manifest_path.is_file(), f"missing file: {manifest_path}")
+    manifest_text = manifest_path.read_text(encoding="utf-8")
+    for expected in [
+        "kind: Namespace",
+        "kind: ServiceAccount",
+        "kind: ClusterRole",
+        "kind: ClusterRoleBinding",
+        "kind: ConfigMap",
+        "kind: Deployment",
+        "kind: Service",
+        "mcr.microsoft.com/oss/v2/prometheus/prometheus:v3.11.3",
+        "kubernetes_sd_configs:",
+        "role: node",
+        "metrics_path: /metrics",
+        "bearer_token_file:",
+        "__PROMETHEUS_SYSTEM_NODE_SELECTOR_KEY__",
+        "__PROMETHEUS_SYSTEM_NODE_SELECTOR_VALUE__",
+    ]:
+        require(expected in manifest_text, f"Prometheus manifest must include {expected!r}")
+    for forbidden_resource in ["services", "endpoints", "pods"]:
+        require(f"- {forbidden_resource}" not in manifest_text, f"Prometheus RBAC must not grant {forbidden_resource}")
+    for family in required_metric_families:
+        require(family in manifest_text, f"Prometheus manifest must retain {family}")
+    require("_bucket|_sum|_count" in manifest_text, "Prometheus relabeling must retain histogram bucket/sum/count series")
+
+    require(metrics_profile_path.is_file(), f"missing file: {metrics_profile_path}")
+    metrics_profile_text = metrics_profile_path.read_text(encoding="utf-8")
+    for family in required_metric_families:
+        require(family in metrics_profile_text, f"kube-burner metrics profile must query {family}")
+
+    require("__PROMETHEUS_ENDPOINT__" in source_config_text, "static suite config must include the Prometheus endpoint placeholder")
+    require("__PROMETHEUS_METRICS_CONFIG__" in source_config_text, "static suite config must include the Prometheus metrics profile placeholder")
+    require("__PROMETHEUS_ENDPOINT__" not in rendered_config_text, "prepared config must replace the Prometheus endpoint placeholder")
+    require("__PROMETHEUS_METRICS_CONFIG__" not in rendered_config_text, "prepared config must replace the Prometheus metrics profile placeholder")
+    require(expected_endpoint in rendered_config_text, "prepared config must include the configured Prometheus endpoint")
+    expected_metrics_paths = {str(metrics_profile_path), str(metrics_profile_path.resolve())}
+    require(
+        any(path in rendered_config_text for path in expected_metrics_paths),
+        "prepared config must include the Prometheus metrics profile path",
+    )
+    require("type: local" in rendered_config_text, "prepared config must preserve local metrics output")
+
+
 def main():
     parser = argparse.ArgumentParser(description="Validate benchmark baseline dry-run and summary outputs")
     parser.add_argument("--output-dir", type=Path, required=True)
@@ -72,6 +122,9 @@ def main():
     parser.add_argument("--pod-template", type=Path, default=Path("templates/runtimeclass-pod.yml"))
     parser.add_argument("--suite-config", type=Path, default=Path("configs/kube-burner-runtimeclass-suite.yml"))
     parser.add_argument("--source-manifest", type=Path, default=Path("configs/runtime-manifest.json"))
+    parser.add_argument("--prometheus-manifest", type=Path, default=Path("manifests/prometheus/prometheus.yml"))
+    parser.add_argument("--prometheus-metrics-profile", type=Path, default=Path("configs/kubelet-startup-metrics.yml"))
+    parser.add_argument("--prometheus-endpoint", default="http://127.0.0.1:9090")
     args = parser.parse_args()
 
     run_dir = args.output_dir / args.run_id
@@ -112,6 +165,14 @@ def main():
     require('runtimeclass: "firecracker"' in config_text, "Firecracker job must include node selector")
     require(config_text.count('key: "runtimeclass"') >= 4, "runtime jobs must include tolerations")
     require("runtimeClassName" not in config_text, "rendered config should not contain pod runtimeClassName directly")
+
+    assert_prometheus_inputs(
+        args.prometheus_manifest,
+        args.prometheus_metrics_profile,
+        source_config_text,
+        config_text,
+        args.prometheus_endpoint,
+    )
 
     assert_runtime_manifest(args.source_manifest, expected_runtimes)
     assert_runtime_manifest(runtime_manifest, expected_runtimes)

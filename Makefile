@@ -23,6 +23,12 @@ KATA_NODE_TAINTS ?= runtimeclass=kata:NoSchedule
 KATA_NODEPOOL_EXTRA_ARGS ?= --workload-runtime KataVmIsolation
 KATA_OPTIMIZED_RUNTIME_CLASS ?= kata-optimized
 KATA_OPTIMIZED_RUNTIME_OVERHEAD_MEMORY ?= 32Mi
+PROMETHEUS_MANIFEST ?= manifests/prometheus/prometheus.yml
+PROMETHEUS_NAMESPACE ?= runtimeclass-bench-prometheus
+PROMETHEUS_SERVICE_NAME ?= prometheus
+PROMETHEUS_SYSTEM_NODE_SELECTOR_KEY ?= kubernetes.azure.com/agentpool
+PROMETHEUS_SYSTEM_NODE_SELECTOR_VALUE ?= $(SYSTEM_NODEPOOL_NAME)
+PROMETHEUS_ROLLOUT_TIMEOUT ?= 5m
 GVISOR_NODEPOOL_NAME ?= gvisor
 GVISOR_RUNTIME_CLASS ?= gvisor
 GVISOR_NODE_LABELS ?= runtimeclass=gvisor
@@ -45,6 +51,8 @@ TOOLS_DIR ?= tools
 # Benchmark workload configuration.
 POD_TEMPLATE ?= templates/runtimeclass-pod.yml
 KUBE_BURNER_CONFIG ?= configs/kube-burner-runtimeclass-suite.yml
+KUBE_BURNER_PROMETHEUS_ENDPOINT ?= http://127.0.0.1:9090
+KUBE_BURNER_PROMETHEUS_METRICS_CONFIG ?= configs/kubelet-startup-metrics.yml
 RUNTIME_MANIFEST ?= configs/runtime-manifest.json
 BENCHMARK_TIMEOUT ?= 4h
 KUBE_CONTEXT ?=
@@ -115,7 +123,7 @@ validate-benchmark-baseline:
 	@mkdir -p results/validation-baseline
 	@$(MAKE) benchmark DRY_RUN=1 OUTPUT_DIR=results/validation-baseline RUN_ID=fixture >/dev/null
 	@scripts/extract-results.py tests/fixtures/kube-burner-suite-metrics --output-dir results/validation-baseline/fixture --run-id fixture --runtime-manifest results/validation-baseline/fixture/runtime-manifest.json
-	@python3 scripts/validate-benchmark-baseline.py --output-dir results/validation-baseline --run-id fixture
+	@python3 scripts/validate-benchmark-baseline.py --output-dir results/validation-baseline --run-id fixture --prometheus-manifest "$(PROMETHEUS_MANIFEST)" --prometheus-metrics-profile "$(KUBE_BURNER_PROMETHEUS_METRICS_CONFIG)" --prometheus-endpoint "$(KUBE_BURNER_PROMETHEUS_ENDPOINT)"
 
 clean-results:
 	@rm -rf results/*

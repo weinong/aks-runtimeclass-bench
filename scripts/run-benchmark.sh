@@ -13,6 +13,10 @@ runtime_manifest="$run_dir/runtime-manifest.json"
 suite_config="$REPO_ROOT/${KUBE_BURNER_CONFIG:-configs/kube-burner-runtimeclass-suite.yml}"
 suite_manifest="$REPO_ROOT/${RUNTIME_MANIFEST:-configs/runtime-manifest.json}"
 metrics_placeholder="__METRICS_DIR__"
+prometheus_endpoint_placeholder="__PROMETHEUS_ENDPOINT__"
+prometheus_metrics_config_placeholder="__PROMETHEUS_METRICS_CONFIG__"
+prometheus_endpoint=${KUBE_BURNER_PROMETHEUS_ENDPOINT:-http://127.0.0.1:9090}
+prometheus_metrics_config="$REPO_ROOT/${KUBE_BURNER_PROMETHEUS_METRICS_CONFIG:-configs/kubelet-startup-metrics.yml}"
 
 resolve_kube_burner() {
   local repo_kube_burner="$REPO_ROOT/${TOOLS_DIR:-tools}/bin/kube-burner"
@@ -40,12 +44,23 @@ fi
 
 [[ -f "$suite_config" ]] || die "kube-burner suite config not found: $suite_config"
 [[ -f "$suite_manifest" ]] || die "runtime manifest not found: $suite_manifest"
+[[ -f "$prometheus_metrics_config" ]] || die "Prometheus metrics profile not found: $prometheus_metrics_config"
+[[ -n "$prometheus_endpoint" ]] || die "KUBE_BURNER_PROMETHEUS_ENDPOINT must not be empty"
 
 config_text=$(<"$suite_config")
 if [[ "$config_text" != *"$metrics_placeholder"* ]]; then
   die "kube-burner suite config must contain metrics directory placeholder: $metrics_placeholder"
 fi
-printf '%s' "${config_text//$metrics_placeholder/$raw_dir}" > "$rendered_config"
+if [[ "$config_text" != *"$prometheus_endpoint_placeholder"* ]]; then
+  die "kube-burner suite config must contain Prometheus endpoint placeholder: $prometheus_endpoint_placeholder"
+fi
+if [[ "$config_text" != *"$prometheus_metrics_config_placeholder"* ]]; then
+  die "kube-burner suite config must contain Prometheus metrics profile placeholder: $prometheus_metrics_config_placeholder"
+fi
+config_text=${config_text//$metrics_placeholder/$raw_dir}
+config_text=${config_text//$prometheus_endpoint_placeholder/$prometheus_endpoint}
+config_text=${config_text//$prometheus_metrics_config_placeholder/$prometheus_metrics_config}
+printf '%s' "$config_text" > "$rendered_config"
 cp "$suite_manifest" "$runtime_manifest"
 log "Prepared kube-burner config from $suite_config at $rendered_config"
 

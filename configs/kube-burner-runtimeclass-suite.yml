@@ -3,6 +3,13 @@ metricsEndpoints:
       type: local
       metricsDirectory: "__METRICS_DIR__"
       createTarball: false
+  - endpoint: "__PROMETHEUS_ENDPOINT__"
+    metrics:
+      - "__PROMETHEUS_METRICS_CONFIG__"
+    indexer:
+      type: local
+      metricsDirectory: "__METRICS_DIR__"
+      createTarball: false
 global:
   gc: true
   measurements:

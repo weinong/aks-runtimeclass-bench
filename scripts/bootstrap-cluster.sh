@@ -15,6 +15,12 @@ firecracker_runtime_class=${FIRECRACKER_RUNTIME_CLASS:-kata-fc}
 firecracker_nodepool_name=${FIRECRACKER_NODEPOOL_NAME:-firecracker}
 firecracker_handler=kata-fc
 kata_deploy_chart=${KATA_DEPLOY_CHART:-oci://quay.io/kata-containers/kata-deploy-charts/kata-deploy}
+prometheus_manifest="$REPO_ROOT/${PROMETHEUS_MANIFEST:-manifests/prometheus/prometheus.yml}"
+prometheus_namespace=${PROMETHEUS_NAMESPACE:-runtimeclass-bench-prometheus}
+prometheus_service_name=${PROMETHEUS_SERVICE_NAME:-prometheus}
+prometheus_node_selector_key=${PROMETHEUS_SYSTEM_NODE_SELECTOR_KEY:-kubernetes.azure.com/agentpool}
+prometheus_node_selector_value=${PROMETHEUS_SYSTEM_NODE_SELECTOR_VALUE:-${SYSTEM_NODEPOOL_NAME:-sys}}
+prometheus_rollout_timeout=${PROMETHEUS_ROLLOUT_TIMEOUT:-5m}
 kubectl_args=()
 helm_args=()
 if [[ -n "${KUBE_CONTEXT:-}" ]]; then
@@ -206,6 +212,48 @@ install_firecracker() {
   fi
 }
 
+validate_dns_label() {
+  local name=$1 value=$2
+  [[ ${#value} -le 63 && "$value" =~ ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$ ]] || die "$name must be a valid Kubernetes DNS label: $value"
+}
+
+validate_label_token() {
+  local name=$1 value=$2
+  [[ "$value" =~ ^[A-Za-z0-9./_-]+$ ]] || die "$name contains characters that are unsafe for manifest rendering: $value"
+}
+
+render_prometheus_manifest() {
+  [[ -f "$prometheus_manifest" ]] || die "Prometheus manifest not found: $prometheus_manifest"
+  local content
+  content=$(<"$prometheus_manifest")
+  content=${content//__PROMETHEUS_NAMESPACE__/$prometheus_namespace}
+  content=${content//__PROMETHEUS_SERVICE_NAME__/$prometheus_service_name}
+  content=${content//__PROMETHEUS_SYSTEM_NODE_SELECTOR_KEY__/$prometheus_node_selector_key}
+  content=${content//__PROMETHEUS_SYSTEM_NODE_SELECTOR_VALUE__/$prometheus_node_selector_value}
+  printf '%s' "$content"
+}
+
+apply_prometheus() {
+  [[ -n "$prometheus_namespace" ]] || die "PROMETHEUS_NAMESPACE must not be empty"
+  [[ -n "$prometheus_service_name" ]] || die "PROMETHEUS_SERVICE_NAME must not be empty"
+  [[ -n "$prometheus_node_selector_key" ]] || die "PROMETHEUS_SYSTEM_NODE_SELECTOR_KEY must not be empty"
+  [[ -n "$prometheus_node_selector_value" ]] || die "PROMETHEUS_SYSTEM_NODE_SELECTOR_VALUE must not be empty"
+  validate_dns_label PROMETHEUS_NAMESPACE "$prometheus_namespace"
+  validate_dns_label PROMETHEUS_SERVICE_NAME "$prometheus_service_name"
+  validate_label_token PROMETHEUS_SYSTEM_NODE_SELECTOR_KEY "$prometheus_node_selector_key"
+  validate_label_token PROMETHEUS_SYSTEM_NODE_SELECTOR_VALUE "$prometheus_node_selector_value"
+
+  print_cmd kubectl "${kubectl_args[@]}" apply -f -
+  if ! is_true "${DRY_RUN:-0}"; then
+    render_prometheus_manifest | kubectl "${kubectl_args[@]}" apply -f -
+  fi
+}
+
+wait_for_prometheus_rollout() {
+  local deploy_ref="deployment/prometheus"
+  run_cmd kubectl "${kubectl_args[@]}" -n "$prometheus_namespace" rollout status "$deploy_ref" --timeout "$prometheus_rollout_timeout"
+}
+
 if is_true "${DRY_RUN:-0}"; then
   log "DRY_RUN=1: printing Kubernetes bootstrap commands without applying components"
 else
@@ -217,6 +265,8 @@ verify_runtime_class_exists "${KATA_RUNTIME_CLASS:-kata-vm-isolation}"
 apply_optimized_runtime_class
 install_gvisor
 install_firecracker
+apply_prometheus
+wait_for_prometheus_rollout
 
 if ! is_true "${DRY_RUN:-0}"; then
   verify_optimized_runtime_class

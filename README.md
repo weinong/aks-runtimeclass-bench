@@ -1,12 +1,12 @@
 # AKS Runtime Class Benchmark
 
-This repository provisions an AKS cluster shape for runtime class benchmarking, runs a static kube-burner suite config, and extracts pod latency quantiles into JSON and CSV summaries.
+This repository provisions an AKS cluster shape for runtime class benchmarking, installs a small in-cluster Prometheus instance for kubelet startup metrics, runs a static kube-burner suite config, and extracts pod latency quantiles into JSON and CSV summaries.
 
 ## Prerequisites
 
 - `make`, `bash`, `python3`, `curl`, `tar`, and either `sha256sum` or `shasum` for local validation and tool installation.
 - Azure CLI logged in with access to the target subscription.
-- `kubectl` for credential validation and benchmark execution.
+- `kubectl` for credential validation, runtime and Prometheus bootstrap, optional port-forwarding, and benchmark execution.
 - `helm` for installing the Kata Deploy chart used by the Firecracker-backed Kata runtime bootstrap.
 - Azure permissions to create resource groups, AKS clusters, node pools, and to fetch AKS credentials. Contributor on the benchmark resource group or equivalent scoped permissions is sufficient for the default workflow.
 - AKS pod sandboxing support for Kata runtime benchmarks. Public AKS pod sandboxing requires Kubernetes 1.27 or newer, Azure Linux node pools, and a Generation 2 VM size that supports nested virtualization. The default `VM_SIZE=Standard_D8s_v5` satisfies the suite's 8 vCPU minimum, but operators must confirm regional quota and feature availability.
@@ -19,11 +19,14 @@ make validate
 make cluster-create RESOURCE_GROUP=rg-aks-rc-bench CLUSTER_NAME=aks-rc-bench LOCATION=eastus
 make bootstrap-cluster
 make kube-burner-install
+kubectl -n runtimeclass-bench-prometheus port-forward svc/prometheus 9090:9090
 make benchmark
 make cluster-delete RESOURCE_GROUP=rg-aks-rc-bench CLUSTER_NAME=aks-rc-bench
 ```
 
 Use `make benchmark-dry-run` to prepare the result-local kube-burner suite config and print the kube-burner command without contacting a cluster. By default, `make benchmark` runs the checked-in static suite from `configs/kube-burner-runtimeclass-suite.yml`, which includes the standard runtime baseline plus the Kata, optimized Kata, gVisor, and Firecracker-backed Kata runtime entries in one kube-burner invocation.
+
+`make bootstrap-cluster` installs the repository-managed Prometheus manifests after applying the optimized Kata RuntimeClass and waits for the Prometheus deployment rollout. Prometheus is exposed as an in-cluster ClusterIP service, so the default local kube-burner workflow expects a `kubectl port-forward` from `127.0.0.1:9090` before `make benchmark`.
 
 ## Important Make Variables
 
@@ -50,11 +53,19 @@ Node pool variables:
 - `GVISOR_RUNTIME_CLASS`: Repository-managed gVisor RuntimeClass applied by `make bootstrap-cluster`. Default: `gvisor`.
 - `FIRECRACKER_RUNTIME_CLASS`: Repository-managed Firecracker-backed Kata RuntimeClass applied by `make bootstrap-cluster`. Default: `kata-fc`; benchmark summaries use the runtime key `firecracker`.
 - `KATA_DEPLOY_CHART`: Helm chart reference used for Firecracker-backed Kata installation. Default: `oci://quay.io/kata-containers/kata-deploy-charts/kata-deploy`.
+- `PROMETHEUS_MANIFEST`: Repo-relative Prometheus manifest applied by `make bootstrap-cluster`. Default: `manifests/prometheus/prometheus.yml`.
+- `PROMETHEUS_NAMESPACE`: Namespace for the in-cluster Prometheus instance. Default: `runtimeclass-bench-prometheus`.
+- `PROMETHEUS_SERVICE_NAME`: ClusterIP service name for Prometheus. Default: `prometheus`.
+- `PROMETHEUS_SYSTEM_NODE_SELECTOR_KEY`: Node selector key used to pin Prometheus to the system node pool. Default: `kubernetes.azure.com/agentpool`.
+- `PROMETHEUS_SYSTEM_NODE_SELECTOR_VALUE`: Node selector value used to pin Prometheus to the system node pool. Default: `$(SYSTEM_NODEPOOL_NAME)`.
+- `PROMETHEUS_ROLLOUT_TIMEOUT`: Timeout for `kubectl rollout status` during bootstrap. Default: `5m`.
 
 kube-burner and workload variables:
 
 - `KUBE_BURNER_VERSION`: Release tag installed under `tools/`. Default: `v2.7.3`.
 - `KUBE_BURNER_CONFIG`: Repo-relative static kube-burner suite config copied into each result root before execution. Default: `configs/kube-burner-runtimeclass-suite.yml`.
+- `KUBE_BURNER_PROMETHEUS_ENDPOINT`: Prometheus endpoint rendered into the per-run kube-burner config. Default: `http://127.0.0.1:9090`.
+- `KUBE_BURNER_PROMETHEUS_METRICS_CONFIG`: Repo-relative kube-burner metrics profile for kubelet startup metrics. Default: `configs/kubelet-startup-metrics.yml`.
 - `RUNTIME_MANIFEST`: Repo-relative static runtime key and label manifest copied into each result root for extraction. Default: `configs/runtime-manifest.json`.
 - `BENCHMARK_TIMEOUT`: Timeout passed to `kube-burner init`. Default: `4h`.
 - `OUTPUT_DIR`: Result root. Default: `results`.
@@ -63,7 +74,7 @@ kube-burner and workload variables:
 
 ## Result Files
 
-Each benchmark invocation writes one result root under `results/<RUN_ID>`. The static kube-burner config is copied to `results/<RUN_ID>/kube-burner.yml`, with only the metrics directory placeholder replaced for that invocation. The config contains one job per runtime key and writes raw metrics under `results/<RUN_ID>/raw`.
+Each benchmark invocation writes one result root under `results/<RUN_ID>`. The static kube-burner config is copied to `results/<RUN_ID>/kube-burner.yml`, with the local metrics directory and Prometheus endpoint placeholders replaced for that invocation. The config contains one job per runtime key and writes raw metrics under `results/<RUN_ID>/raw`.
 
 The default runtime keys are:
 
@@ -77,13 +88,15 @@ To change runtime topology, edit both checked-in benchmark inputs together:
 
 - Add or remove kube-burner jobs in `configs/kube-burner-runtimeclass-suite.yml`.
 - Add or remove matching runtime entries in `configs/runtime-manifest.json` so the extractor expects the same runtime keys.
-- Keep the `__METRICS_DIR__` placeholder in the static suite config; `make benchmark` replaces it with the run's raw metrics directory.
+- Keep the `__METRICS_DIR__`, `__PROMETHEUS_ENDPOINT__`, and `__PROMETHEUS_METRICS_CONFIG__` placeholders in the static suite config; `make benchmark` replaces them with the run's raw metrics directory, configured Prometheus endpoint, and metrics profile path.
 
 - `summary.json`: Aggregate run metadata and required pod latency quantiles for every runtime entry.
 - `summary.csv`: Aggregate rows for `run_id`, `runtime_key`, `runtime_class`, `condition`, `p50`, `p95`, and `p99` when `CSV_OUTPUT=true`.
 - `kube-burner.yml`: Static kube-burner suite config prepared for the invocation.
 - `runtime-manifest.json`: Copied runtime keys and summary labels used by the extractor.
 - `raw/`: kube-burner local metrics output.
+
+The Prometheus metrics profile queries these kubelet metric families from the configured Prometheus endpoint: `kubelet_run_podsandbox_duration_seconds`, `kubelet_pod_start_sli_duration_seconds`, and `kubelet_pod_start_total_duration_seconds`, including `_bucket`, `_sum`, and `_count` series where present.
 
 The extractor fails if any required condition or P50/P95/P99 value is missing.
 
@@ -93,6 +106,17 @@ The extractor fails if any required condition or P50/P95/P99 value is missing.
 2. Run `make cluster-create` with the target Azure settings. Confirm the command completes and `az aks nodepool list --resource-group <rg> --cluster-name <cluster> --query '[].{name:name,count:count}'` reports `sys=2`, `kata=1`, `gvisor=1`, and `firecracker=1` unless you overrode node pool names.
 3. Run `make bootstrap-cluster` if you need to reapply repository-managed Kubernetes components after cluster credentials are configured. Set `KUBE_CONTEXT=<context>` to target a specific kube context. Confirm `kubectl get runtimeclass kata-optimized -o jsonpath='{.handler}{" "}{.overhead.podFixed.memory}'` prints `kata 32Mi`, and confirm `kubectl get runtimeclass gvisor kata-fc` shows both repository-managed runtime classes. For exact handlers, `kubectl get runtimeclass gvisor -o jsonpath='{.handler}'` should print `runsc` and `kubectl get runtimeclass kata-fc -o jsonpath='{.handler}'` should print `kata-fc`.
 4. Run `make kube-burner-install` and confirm `tools/bin/kube-burner version` works.
-5. Run `make benchmark`.
-6. Confirm `results/<RUN_ID>/summary.json`, `results/<RUN_ID>/summary.csv`, and `results/<RUN_ID>/kube-burner.yml` exist, and that the summaries contain all five required pod latency conditions and P50/P95/P99 values for `standard`, `kata`, `kata-optimized`, `gvisor`, and `firecracker`.
-7. Run `make cluster-delete` with the same resource variables. Use `TEARDOWN_SCOPE=resource-group` only when the resource group is dedicated to the benchmark.
+5. Confirm Prometheus is available with `kubectl -n runtimeclass-bench-prometheus rollout status deployment/prometheus --timeout 5m`.
+6. If kube-burner runs from your local shell, start `kubectl -n runtimeclass-bench-prometheus port-forward svc/prometheus 9090:9090` and leave it running. If you use a different local port or endpoint, pass `KUBE_BURNER_PROMETHEUS_ENDPOINT=<endpoint>` to `make benchmark`.
+7. Before a long benchmark, verify Prometheus can query the kubelet metrics:
+
+```bash
+curl -G 'http://127.0.0.1:9090/api/v1/query' --data-urlencode 'query=kubelet_run_podsandbox_duration_seconds_count'
+curl -G 'http://127.0.0.1:9090/api/v1/query' --data-urlencode 'query=kubelet_pod_start_sli_duration_seconds_count'
+curl -G 'http://127.0.0.1:9090/api/v1/query' --data-urlencode 'query=kubelet_pod_start_total_duration_seconds_count'
+```
+
+8. Run `make benchmark`.
+9. Confirm `results/<RUN_ID>/summary.json`, `results/<RUN_ID>/summary.csv`, and `results/<RUN_ID>/kube-burner.yml` exist, and that the summaries contain all five required pod latency conditions and P50/P95/P99 values for `standard`, `kata`, `kata-optimized`, `gvisor`, and `firecracker`.
+10. Confirm the rendered `results/<RUN_ID>/kube-burner.yml` contains the configured Prometheus endpoint and references `configs/kubelet-startup-metrics.yml`; confirm that metrics profile contains the three kubelet startup metric queries.
+11. Run `make cluster-delete` with the same resource variables. Use `TEARDOWN_SCOPE=resource-group` only when the resource group is dedicated to the benchmark.

@@ -1,0 +1,6 @@
+- query: '{__name__=~"kubelet_run_podsandbox_duration_seconds(_bucket|_sum|_count)?"}'
+  metricName: kubeletRunPodSandboxDurationSeconds
+- query: '{__name__=~"kubelet_pod_start_sli_duration_seconds(_bucket|_sum|_count)?"}'
+  metricName: kubeletPodStartSliDurationSeconds
+- query: '{__name__=~"kubelet_pod_start_total_duration_seconds(_bucket|_sum|_count)?"}'
+  metricName: kubeletPodStartTotalDurationSeconds
