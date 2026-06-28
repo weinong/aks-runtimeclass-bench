@@ -62,7 +62,6 @@ BENCHMARK_CLEANUP ?= true
 BENCHMARK_WAIT_WHEN_FINISHED ?= true
 BENCHMARK_POD_WAIT ?= true
 BENCHMARK_TIMEOUT ?= 4h
-KUBECONFIG ?=
 KUBE_CONTEXT ?=
 OUTPUT_DIR ?= results
 RUN_ID ?= runtimeclass-$(shell date -u +%Y%m%dT%H%M%SZ)
