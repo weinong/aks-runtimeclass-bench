@@ -30,9 +30,13 @@ ensure_cluster() {
 
   if ! is_true "${DRY_RUN:-0}" && cluster_exists; then
     log "Cluster $CLUSTER_NAME already exists; updating mutable cluster settings"
-    cmd=(az aks update --resource-group "$RESOURCE_GROUP" --name "$CLUSTER_NAME")
-    append_words cmd "${CLUSTER_EXTRA_ARGS:-}"
-    run_cmd "${cmd[@]}"
+    if [[ -n "${CLUSTER_EXTRA_ARGS:-}" ]]; then
+      cmd=(az aks update --resource-group "$RESOURCE_GROUP" --name "$CLUSTER_NAME")
+      append_words cmd "${CLUSTER_EXTRA_ARGS:-}"
+      run_cmd "${cmd[@]}"
+    else
+      log "No CLUSTER_EXTRA_ARGS specified; skipping cluster update"
+    fi
     run_cmd az aks nodepool scale --resource-group "$RESOURCE_GROUP" --cluster-name "$CLUSTER_NAME" --name "$SYSTEM_NODEPOOL_NAME" --node-count 2
     return
   fi
@@ -128,7 +132,7 @@ ensure_nodepool "$GVISOR_NODEPOOL_NAME" "$GVISOR_NODE_LABELS" "$GVISOR_NODE_TAIN
 ensure_nodepool "$FIRECRACKER_NODEPOOL_NAME" "$FIRECRACKER_NODE_LABELS" "$FIRECRACKER_NODE_TAINTS" "$FIRECRACKER_NODEPOOL_EXTRA_ARGS"
 
 if ! is_true "${DRY_RUN:-0}"; then
-  run_cmd az aks update --resource-group "$RESOURCE_GROUP" --name "$CLUSTER_NAME"
+  run_cmd az aks update --resource-group "$RESOURCE_GROUP" --name "$CLUSTER_NAME" --yes
   run_cmd az aks get-credentials --resource-group "$RESOURCE_GROUP" --name "$CLUSTER_NAME" --overwrite-existing
   verify_nodepool_count "$SYSTEM_NODEPOOL_NAME" 2
   verify_nodepool_count "$KATA_NODEPOOL_NAME" 1
