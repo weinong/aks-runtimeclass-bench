@@ -88,5 +88,50 @@
     "P50": 3897,
     "P95": 4510,
     "P99": 4774
+  },
+  {
+    "metricName": "podLatencyQuantilesMeasurement",
+    "jobName": "runtimeclass-pod-latency-kata-optimized",
+    "quantileName": "PodScheduled",
+    "uuid": "fixture",
+    "P50": 12,
+    "P95": 16,
+    "P99": 70
+  },
+  {
+    "metricName": "podLatencyQuantilesMeasurement",
+    "jobName": "runtimeclass-pod-latency-kata-optimized",
+    "quantileName": "PodReadyToStartContainers",
+    "uuid": "fixture",
+    "P50": 110,
+    "P95": 130,
+    "P99": 145
+  },
+  {
+    "metricName": "podLatencyQuantilesMeasurement",
+    "jobName": "runtimeclass-pod-latency-kata-optimized",
+    "quantileName": "ContainersStarted",
+    "uuid": "fixture",
+    "P50": 190,
+    "P95": 230,
+    "P99": 290
+  },
+  {
+    "metricName": "podLatencyQuantilesMeasurement",
+    "jobName": "runtimeclass-pod-latency-kata-optimized",
+    "quantileName": "ContainersReady",
+    "uuid": "fixture",
+    "P50": 3690,
+    "P95": 4310,
+    "P99": 4574
+  },
+  {
+    "metricName": "podLatencyQuantilesMeasurement",
+    "jobName": "runtimeclass-pod-latency-kata-optimized",
+    "quantileName": "Ready",
+    "uuid": "fixture",
+    "P50": 3697,
+    "P95": 4310,
+    "P99": 4574
   }
 ]

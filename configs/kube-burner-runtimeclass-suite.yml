@@ -63,3 +63,32 @@ jobs:
               key: "runtimeclass"
               operator: "Equal"
               value: "kata"
+  - name: runtimeclass-pod-latency-kata-optimized
+    jobIterations: 35
+    qps: 20
+    burst: 20
+    namespace: "runtimeclass-bench-kata-optimized"
+    namespacedIterations: false
+    cleanup: true
+    waitWhenFinished: true
+    podWait: true
+    objects:
+      - objectTemplate: "templates/runtimeclass-pod.yml"
+        replicas: 1
+        inputVars:
+          runtimeKey: "kata-optimized"
+          runtimeClass: "kata-optimized"
+          containerImage: "mcr.microsoft.com/oss/v2/kubernetes/pause:3.10.2"
+          command:
+            []
+          cpuRequest: "10m"
+          memoryRequest: "32Mi"
+          cpuLimit: "100m"
+          memoryLimit: "128Mi"
+          nodeSelector:
+            runtimeclass: "kata"
+          tolerations:
+            - effect: "NoSchedule"
+              key: "runtimeclass"
+              operator: "Equal"
+              value: "kata"

@@ -126,13 +126,6 @@ verify_nodepool_count() {
   log "Verified node pool $name has count $expected"
 }
 
-verify_runtime_class() {
-  local name=$1
-  [[ -n "$name" ]] || return 0
-  kubectl get runtimeclass "$name" >/dev/null 2>&1 || die "runtime class $name was not found after AKS pod sandboxing update"
-  log "Verified runtime class $name exists"
-}
-
 if is_true "${DRY_RUN:-0}"; then
   log "DRY_RUN=1: printing Azure commands without validating live VM size or provisioning"
 else
@@ -154,5 +147,5 @@ if ! is_true "${DRY_RUN:-0}"; then
   verify_nodepool_count "$KATA_NODEPOOL_NAME" 1
   verify_nodepool_count "$GVISOR_NODEPOOL_NAME" 1
   verify_nodepool_count "$FIRECRACKER_NODEPOOL_NAME" 1
-  verify_runtime_class "$KATA_RUNTIME_CLASS"
+  run_cmd "$SCRIPT_DIR/bootstrap-cluster.sh"
 fi

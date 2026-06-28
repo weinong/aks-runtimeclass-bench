@@ -21,6 +21,8 @@ KATA_RUNTIME_CLASS ?= kata-vm-isolation
 KATA_NODE_LABELS ?= runtimeclass=kata
 KATA_NODE_TAINTS ?= runtimeclass=kata:NoSchedule
 KATA_NODEPOOL_EXTRA_ARGS ?= --workload-runtime KataVmIsolation
+KATA_OPTIMIZED_RUNTIME_CLASS ?= kata-optimized
+KATA_OPTIMIZED_RUNTIME_OVERHEAD_MEMORY ?= 32Mi
 GVISOR_NODEPOOL_NAME ?= gvisor
 GVISOR_RUNTIME_CLASS ?= gvisor
 GVISOR_NODE_LABELS ?= runtimeclass=gvisor
@@ -50,11 +52,12 @@ RUN_ID ?= runtimeclass-$(shell date -u +%Y%m%dT%H%M%SZ)
 CSV_OUTPUT ?= true
 DRY_RUN ?= 0
 
-.PHONY: help cluster-create cluster-delete kube-burner-install benchmark benchmark-dry-run validate validate-make validate-shell validate-config test-extract validate-benchmark-baseline clean-results
+.PHONY: help cluster-create bootstrap-cluster cluster-delete kube-burner-install benchmark benchmark-dry-run validate validate-make validate-shell validate-config test-extract validate-benchmark-baseline clean-results
 
 help:
 	@printf 'AKS runtime class benchmark targets:\n'
 	@printf '  make cluster-create        Create/update AKS cluster and runtime node pools\n'
+	@printf '  make bootstrap-cluster     Apply repository-managed Kubernetes components\n'
 	@printf '  make cluster-delete        Delete cluster or resource group resources\n'
 	@printf '  make kube-burner-install   Install kube-burner under $(TOOLS_DIR)/\n'
 	@printf '  make benchmark             Run kube-burner and extract JSON/CSV summaries\n'
@@ -66,6 +69,9 @@ help:
 
 cluster-create:
 	@scripts/cluster-create.sh
+
+bootstrap-cluster:
+	@scripts/bootstrap-cluster.sh
 
 cluster-delete:
 	@scripts/cluster-delete.sh
@@ -83,6 +89,7 @@ validate: validate-make validate-shell validate-config test-extract validate-ben
 
 validate-make:
 	@$(MAKE) --dry-run help >/dev/null
+	@$(MAKE) --dry-run bootstrap-cluster DRY_RUN=1 >/dev/null
 	@$(MAKE) --dry-run benchmark DRY_RUN=1 >/dev/null
 
 validate-shell:
