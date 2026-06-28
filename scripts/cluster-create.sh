@@ -24,6 +24,22 @@ nodepool_exists() {
   az aks nodepool show --resource-group "$RESOURCE_GROUP" --cluster-name "$CLUSTER_NAME" --name "$1" >/dev/null 2>&1
 }
 
+ensure_nodepool_count() {
+  local name=$1
+  local expected=$2
+  local actual
+
+  if ! is_true "${DRY_RUN:-0}"; then
+    actual=$(az aks nodepool show --resource-group "$RESOURCE_GROUP" --cluster-name "$CLUSTER_NAME" --name "$name" --query count -o tsv)
+    if [[ "$actual" == "$expected" ]]; then
+      log "Node pool $name already has count $expected; skipping scale"
+      return
+    fi
+  fi
+
+  run_cmd az aks nodepool scale --resource-group "$RESOURCE_GROUP" --cluster-name "$CLUSTER_NAME" --name "$name" --node-count "$expected"
+}
+
 ensure_cluster() {
   local cmd
   run_cmd az group create --name "$RESOURCE_GROUP" --location "$LOCATION"
@@ -37,7 +53,7 @@ ensure_cluster() {
     else
       log "No CLUSTER_EXTRA_ARGS specified; skipping cluster update"
     fi
-    run_cmd az aks nodepool scale --resource-group "$RESOURCE_GROUP" --cluster-name "$CLUSTER_NAME" --name "$SYSTEM_NODEPOOL_NAME" --node-count 2
+    ensure_nodepool_count "$SYSTEM_NODEPOOL_NAME" 2
     return
   fi
 
@@ -67,7 +83,7 @@ ensure_nodepool() {
 
   if ! is_true "${DRY_RUN:-0}" && nodepool_exists "$name"; then
     log "Node pool $name already exists; enforcing count and placement metadata"
-    run_cmd az aks nodepool scale --resource-group "$RESOURCE_GROUP" --cluster-name "$CLUSTER_NAME" --name "$name" --node-count 1
+    ensure_nodepool_count "$name" 1
     update_cmd=(az aks nodepool update --resource-group "$RESOURCE_GROUP" --cluster-name "$CLUSTER_NAME" --name "$name")
     if [[ -n "$labels" ]]; then
       update_cmd+=(--labels)
