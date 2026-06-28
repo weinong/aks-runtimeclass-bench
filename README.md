@@ -21,7 +21,7 @@ make benchmark RUNTIME_CLASS=kata-vm-isolation NODE_SELECTOR=runtimeclass=kata T
 make cluster-delete RESOURCE_GROUP=rg-aks-rc-bench CLUSTER_NAME=aks-rc-bench
 ```
 
-Use `make benchmark-dry-run` to render benchmark input and print the kube-burner command without contacting a cluster.
+Use `make benchmark-dry-run` to render benchmark input and print the kube-burner commands without contacting a cluster. When `RUNTIME_CLASS` is set, `make benchmark` always runs a standard-runtime baseline first, then runs the requested runtime class benchmark.
 
 ## Important Make Variables
 
@@ -47,9 +47,11 @@ Node pool variables:
 kube-burner and workload variables:
 
 - `KUBE_BURNER_VERSION`: Release tag installed under `tools/`. Default: `v2.7.3`.
-- `RUNTIME_CLASS`: Runtime class rendered into pod specs. Leave empty for standard runtime pods.
+- `RUNTIME_CLASS`: Runtime class rendered into pod specs for the selected runtime. Leave empty to run only the standard runtime baseline. When set, `make benchmark` also runs a standard baseline with no runtime class.
 - `NODE_SELECTOR`: Comma-separated `key=value` selector used for pod placement, for example `runtimeclass=kata`.
 - `TOLERATIONS_JSON`: JSON array of Kubernetes toleration objects.
+- `BASELINE_NODE_SELECTOR`: Optional comma-separated `key=value` selector for the automatic standard-runtime baseline. Default: empty.
+- `BASELINE_TOLERATIONS_JSON`: Optional JSON array of tolerations for the automatic standard-runtime baseline. Default: `[]`.
 - `POD_COUNT`: kube-burner job iterations. Default: `50`.
 - `POD_REPLICAS`: Replicas per iteration. Default: `1`.
 - `POD_IMAGE`: Container image. Default: `registry.k8s.io/pause:3.10`.
@@ -62,7 +64,16 @@ kube-burner and workload variables:
 
 ## Result Files
 
-Each benchmark run writes raw kube-burner metrics under `results/<RUN_ID>/raw` and summary files under `results/<RUN_ID>`.
+Each single-runtime benchmark writes raw kube-burner metrics under `results/<RUN_ID>/raw` and summary files under `results/<RUN_ID>`.
+
+When `RUNTIME_CLASS` is unset, `make benchmark` runs only the standard baseline and writes `results/<RUN_ID>`.
+
+When `RUNTIME_CLASS` is set, `make benchmark` writes two result directories:
+
+- `results/<RUN_ID>-standard`: Automatic standard-runtime baseline with no `runtimeClassName`.
+- `results/<RUN_ID>-<runtime-class>`: Requested runtime class benchmark, with characters outside `A-Z`, `a-z`, `0-9`, `_`, `.`, and `-` replaced by `-`.
+
+If the requested runtime class slug would also be `standard`, the explicit runtime run uses `results/<RUN_ID>-standard-runtime` to keep it separate from the baseline.
 
 - `summary.json`: Run metadata and required pod latency quantiles for `PodScheduled`, `PodReadyToStartContainers`, `ContainersStarted`, `ContainersReady`, and `Ready`.
 - `summary.csv`: Rows for `run_id`, `runtime_class`, `condition`, `p50`, `p95`, and `p99` when `CSV_OUTPUT=true`.
@@ -76,5 +87,5 @@ The extractor fails if any required condition or P50/P95/P99 value is missing.
 2. Run `make cluster-create` with the target Azure settings. Confirm the command completes and `az aks nodepool list --resource-group <rg> --cluster-name <cluster> --query '[].{name:name,count:count}'` reports `sys=2`, `kata=1`, `gvisor=1`, and `firecracker=1` unless you overrode node pool names.
 3. Run `make kube-burner-install` and confirm `tools/bin/kube-burner version` works.
 4. Run at least one runtime benchmark, for example the Kata command in the basic workflow.
-5. Confirm `results/<RUN_ID>/summary.json` and `results/<RUN_ID>/summary.csv` contain all five required pod latency conditions and P50/P95/P99 values.
+5. Confirm both `results/<RUN_ID>-standard` and `results/<RUN_ID>-kata-vm-isolation` contain `summary.json` and `summary.csv` with all five required pod latency conditions and P50/P95/P99 values.
 6. Run `make cluster-delete` with the same resource variables. Use `TEARDOWN_SCOPE=resource-group` only when the resource group is dedicated to the benchmark.

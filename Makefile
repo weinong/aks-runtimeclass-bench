@@ -45,6 +45,8 @@ POD_TEMPLATE ?= templates/runtimeclass-pod.yml
 RUNTIME_CLASS ?=
 NODE_SELECTOR ?=
 TOLERATIONS_JSON ?= []
+BASELINE_NODE_SELECTOR ?=
+BASELINE_TOLERATIONS_JSON ?= []
 POD_COUNT ?= 50
 POD_REPLICAS ?= 1
 POD_IMAGE ?= mcr.microsoft.com/oss/v2/kubernetes/pause:3.10.2
@@ -67,7 +69,7 @@ RUN_ID ?= runtimeclass-$(shell date -u +%Y%m%dT%H%M%SZ)
 CSV_OUTPUT ?= true
 DRY_RUN ?= 0
 
-.PHONY: help cluster-create cluster-delete kube-burner-install benchmark benchmark-dry-run validate validate-make validate-shell validate-config test-extract clean-results
+.PHONY: help cluster-create cluster-delete kube-burner-install benchmark benchmark-dry-run validate validate-make validate-shell validate-config test-extract validate-benchmark-baseline clean-results
 
 help:
 	@printf 'AKS runtime class benchmark targets:\n'
@@ -75,7 +77,7 @@ help:
 	@printf '  make cluster-delete        Delete cluster or resource group resources\n'
 	@printf '  make kube-burner-install   Install kube-burner under $(TOOLS_DIR)/\n'
 	@printf '  make benchmark             Run kube-burner and extract JSON/CSV summaries\n'
-	@printf '  make benchmark-dry-run     Render benchmark inputs and print the command\n'
+	@printf '  make benchmark-dry-run     Render benchmark inputs and print the commands\n'
 	@printf '  make validate              Run local syntax, rendering, and extractor checks\n'
 	@printf '\nCommon overrides:\n'
 	@printf '  RESOURCE_GROUP=%s CLUSTER_NAME=%s LOCATION=%s VM_SIZE=%s\n' '$(RESOURCE_GROUP)' '$(CLUSTER_NAME)' '$(LOCATION)' '$(VM_SIZE)'
@@ -96,7 +98,7 @@ benchmark:
 benchmark-dry-run:
 	@$(MAKE) benchmark DRY_RUN=1
 
-validate: validate-make validate-shell validate-config test-extract
+validate: validate-make validate-shell validate-config test-extract validate-benchmark-baseline
 
 validate-make:
 	@$(MAKE) --dry-run help >/dev/null
@@ -116,6 +118,15 @@ validate-config:
 test-extract:
 	@mkdir -p results/validation
 	@scripts/extract-results.py tests/fixtures/kube-burner-metrics --output-dir results/validation --run-id fixture --runtime-class kata-vm-isolation
+
+validate-benchmark-baseline:
+	@rm -rf results/validation-baseline
+	@mkdir -p results/validation-baseline
+	@$(MAKE) benchmark DRY_RUN=1 OUTPUT_DIR=results/validation-baseline RUN_ID=fixture RUNTIME_CLASS=kata-vm-isolation NODE_SELECTOR=runtimeclass=kata TOLERATIONS_JSON='[{"key":"runtimeclass","operator":"Equal","value":"kata","effect":"NoSchedule"}]' >/dev/null
+	@$(MAKE) benchmark DRY_RUN=1 OUTPUT_DIR=results/validation-baseline RUN_ID=fixture-default RUNTIME_CLASS= >/dev/null
+	@scripts/extract-results.py tests/fixtures/kube-burner-metrics --output-dir results/validation-baseline/fixture-standard --run-id fixture-standard
+	@scripts/extract-results.py tests/fixtures/kube-burner-metrics --output-dir results/validation-baseline/fixture-kata-vm-isolation --run-id fixture-kata-vm-isolation --runtime-class kata-vm-isolation
+	@python3 scripts/validate-benchmark-baseline.py --output-dir results/validation-baseline --run-id fixture --runtime-class kata-vm-isolation --baseline-only-run-id fixture-default
 
 clean-results:
 	@rm -rf results/*
