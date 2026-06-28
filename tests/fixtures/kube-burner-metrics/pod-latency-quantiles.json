@@ -1,0 +1,42 @@
+[
+  {
+    "metricName": "podLatencyQuantilesMeasurement",
+    "quantileName": "PodScheduled",
+    "uuid": "fixture",
+    "P50": 5,
+    "P95": 8,
+    "P99": 64
+  },
+  {
+    "metricName": "podLatencyQuantilesMeasurement",
+    "quantileName": "PodReadyToStartContainers",
+    "uuid": "fixture",
+    "P50": 20,
+    "P95": 35,
+    "P99": 50
+  },
+  {
+    "metricName": "podLatencyQuantilesMeasurement",
+    "quantileName": "ContainersStarted",
+    "uuid": "fixture",
+    "P50": 100,
+    "P95": 140,
+    "P99": 200
+  },
+  {
+    "metricName": "podLatencyQuantilesMeasurement",
+    "quantileName": "ContainersReady",
+    "uuid": "fixture",
+    "P50": 2890,
+    "P95": 3510,
+    "P99": 3774
+  },
+  {
+    "metricName": "podLatencyQuantilesMeasurement",
+    "quantileName": "Ready",
+    "uuid": "fixture",
+    "P50": 2897,
+    "P95": 3510,
+    "P99": 3774
+  }
+]

@@ -1,0 +1,46 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: runtimeclass-bench-{{.Iteration}}-{{.Replica}}
+  labels:
+    app.kubernetes.io/name: runtimeclass-bench
+    kube-burner-job: runtimeclass-pod-latency
+spec:
+{{- if .runtimeClass }}
+  runtimeClassName: {{.runtimeClass}}
+{{- end }}
+{{- if .nodeSelector }}
+  nodeSelector:
+{{- range $key, $value := .nodeSelector }}
+    {{ $key }}: {{ printf "%q" $value }}
+{{- end }}
+{{- end }}
+{{- if .tolerations }}
+  tolerations:
+{{- range .tolerations }}
+    - key: {{ printf "%q" .key }}
+      operator: {{ printf "%q" .operator }}
+{{- if .value }}
+      value: {{ printf "%q" .value }}
+{{- end }}
+      effect: {{ printf "%q" .effect }}
+{{- end }}
+{{- end }}
+  restartPolicy: Never
+  containers:
+    - name: runtimeclass-bench
+      image: {{.containerImage}}
+      imagePullPolicy: IfNotPresent
+{{- if .command }}
+      command:
+{{- range .command }}
+        - {{ printf "%q" . }}
+{{- end }}
+{{- end }}
+      resources:
+        requests:
+          cpu: {{.cpuRequest}}
+          memory: {{.memoryRequest}}
+        limits:
+          cpu: {{.cpuLimit}}
+          memory: {{.memoryLimit}}
