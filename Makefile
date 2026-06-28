@@ -29,10 +29,11 @@ GVISOR_NODE_LABELS ?= runtimeclass=gvisor
 GVISOR_NODE_TAINTS ?= runtimeclass=gvisor:NoSchedule
 GVISOR_NODEPOOL_EXTRA_ARGS ?=
 FIRECRACKER_NODEPOOL_NAME ?= firecracker
-FIRECRACKER_RUNTIME_CLASS ?= firecracker
+FIRECRACKER_RUNTIME_CLASS ?= kata-fc
 FIRECRACKER_NODE_LABELS ?= runtimeclass=firecracker
 FIRECRACKER_NODE_TAINTS ?= runtimeclass=firecracker:NoSchedule
 FIRECRACKER_NODEPOOL_EXTRA_ARGS ?=
+KATA_DEPLOY_CHART ?= oci://quay.io/kata-containers/kata-deploy-charts/kata-deploy
 TEARDOWN_SCOPE ?= cluster
 
 # kube-burner installation.

@@ -2,15 +2,52 @@
 set -Eeuo pipefail
 
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+REPO_ROOT=$(cd -- "$SCRIPT_DIR/.." && pwd)
 source "$SCRIPT_DIR/common.sh"
 
 optimized_runtime_class=${KATA_OPTIMIZED_RUNTIME_CLASS:-kata-optimized}
 optimized_overhead_memory=${KATA_OPTIMIZED_RUNTIME_OVERHEAD_MEMORY:-32Mi}
 optimized_handler=kata
+gvisor_runtime_class=${GVISOR_RUNTIME_CLASS:-gvisor}
+gvisor_nodepool_name=${GVISOR_NODEPOOL_NAME:-gvisor}
+gvisor_handler=runsc
+firecracker_runtime_class=${FIRECRACKER_RUNTIME_CLASS:-kata-fc}
+firecracker_nodepool_name=${FIRECRACKER_NODEPOOL_NAME:-firecracker}
+firecracker_handler=kata-fc
+kata_deploy_chart=${KATA_DEPLOY_CHART:-oci://quay.io/kata-containers/kata-deploy-charts/kata-deploy}
 kubectl_args=()
+helm_args=()
 if [[ -n "${KUBE_CONTEXT:-}" ]]; then
   kubectl_args+=(--context "$KUBE_CONTEXT")
+  helm_args+=(--kube-context "$KUBE_CONTEXT")
 fi
+
+render_manifest() {
+  local path=$1
+  [[ -f "$path" ]] || die "manifest not found: $path"
+  local content
+  content=$(<"$path")
+  content=${content//__GVISOR_NODEPOOL_NAME__/$gvisor_nodepool_name}
+  content=${content//__FIRECRACKER_NODEPOOL_NAME__/$firecracker_nodepool_name}
+  content=${content//__FIRECRACKER_RUNTIME_CLASS__/$firecracker_runtime_class}
+  printf '%s' "$content"
+}
+
+apply_rendered_manifest() {
+  local path=$1
+  print_cmd kubectl "${kubectl_args[@]}" apply -f -
+  if is_true "${DRY_RUN:-0}"; then
+    render_manifest "$path"
+    printf '\n'
+  else
+    render_manifest "$path" | kubectl "${kubectl_args[@]}" apply -f -
+  fi
+}
+
+wait_for_pod_succeeded() {
+  local namespace=$1 pod=$2 timeout=$3
+  run_cmd kubectl "${kubectl_args[@]}" -n "$namespace" wait --for=jsonpath='{.status.phase}'=Succeeded "pod/$pod" --timeout "$timeout"
+}
 
 verify_runtime_class_exists() {
   local name=$1
@@ -51,15 +88,77 @@ verify_optimized_runtime_class() {
   log "Verified runtime class $optimized_runtime_class uses handler $optimized_handler and memory overhead $optimized_overhead_memory"
 }
 
+verify_runtime_class_handler() {
+  local name=$1
+  local expected_handler=$2
+  local handler
+  handler=$(kubectl "${kubectl_args[@]}" get runtimeclass "$name" -o jsonpath='{.handler}')
+  [[ "$handler" == "$expected_handler" ]] || die "runtime class $name handler is $handler, expected $expected_handler"
+  log "Verified runtime class $name uses handler $expected_handler"
+}
+
+install_gvisor() {
+  [[ -n "$gvisor_runtime_class" ]] || die "GVISOR_RUNTIME_CLASS must not be empty"
+  [[ "$gvisor_runtime_class" == "gvisor" ]] || die "GVISOR_RUNTIME_CLASS must remain gvisor for the repository-managed installer"
+  [[ -n "$gvisor_nodepool_name" ]] || die "GVISOR_NODEPOOL_NAME must not be empty"
+
+  log "Installing gVisor runtime on node pool $gvisor_nodepool_name"
+  apply_rendered_manifest "$REPO_ROOT/configs/runtime-install/gvisor/install.yaml"
+  if ! is_true "${DRY_RUN:-0}"; then
+    run_cmd kubectl "${kubectl_args[@]}" -n runtimeclass-gvisor rollout status daemonset/gvisor-installer --timeout=10m
+    wait_for_pod_succeeded runtimeclass-gvisor gvisor-smoke 10m
+  fi
+}
+
+install_firecracker() {
+  [[ -n "$firecracker_runtime_class" ]] || die "FIRECRACKER_RUNTIME_CLASS must not be empty"
+  [[ "$firecracker_runtime_class" == "kata-fc" ]] || die "FIRECRACKER_RUNTIME_CLASS must remain kata-fc for the Kata fc shim"
+  [[ -n "$firecracker_nodepool_name" ]] || die "FIRECRACKER_NODEPOOL_NAME must not be empty"
+  [[ -n "$kata_deploy_chart" ]] || die "KATA_DEPLOY_CHART must not be empty"
+
+  log "Installing Firecracker-backed Kata runtime on node pool $firecracker_nodepool_name"
+  apply_rendered_manifest "$REPO_ROOT/configs/runtime-install/firecracker/devmapper.yaml"
+  if ! is_true "${DRY_RUN:-0}"; then
+    run_cmd kubectl "${kubectl_args[@]}" -n runtimeclass-firecracker rollout status daemonset/firecracker-devmapper-installer --timeout=10m
+  fi
+
+  local values_file
+  values_file=$(mktemp)
+  render_manifest "$REPO_ROOT/configs/runtime-install/firecracker/kata-deploy-values-fc.yaml" > "$values_file"
+  print_cmd helm "${helm_args[@]}" upgrade --install kata-deploy-fc "$kata_deploy_chart" --namespace kata-system --create-namespace --values "$values_file"
+  if is_true "${DRY_RUN:-0}"; then
+    printf '# Rendered Firecracker Kata Deploy values from configs/runtime-install/firecracker/kata-deploy-values-fc.yaml\n'
+    render_manifest "$REPO_ROOT/configs/runtime-install/firecracker/kata-deploy-values-fc.yaml"
+    printf '\n'
+    rm -f "$values_file"
+  else
+    helm "${helm_args[@]}" upgrade --install kata-deploy-fc "$kata_deploy_chart" --namespace kata-system --create-namespace --values "$values_file"
+    rm -f "$values_file"
+    run_cmd kubectl "${kubectl_args[@]}" -n kata-system rollout status daemonset/kata-deploy --timeout=20m
+  fi
+
+  apply_rendered_manifest "$REPO_ROOT/configs/runtime-install/firecracker/pre-pull.yaml"
+  if ! is_true "${DRY_RUN:-0}"; then
+    run_cmd kubectl "${kubectl_args[@]}" -n runtimeclass-firecracker rollout status daemonset/firecracker-pre-pull --timeout=10m
+    apply_rendered_manifest "$REPO_ROOT/configs/runtime-install/firecracker/smoke-pod.yaml"
+    wait_for_pod_succeeded runtimeclass-firecracker firecracker-smoke 10m
+  fi
+}
+
 if is_true "${DRY_RUN:-0}"; then
   log "DRY_RUN=1: printing Kubernetes bootstrap commands without applying components"
 else
   require_command kubectl
+  require_command helm
 fi
 
 verify_runtime_class_exists "${KATA_RUNTIME_CLASS:-kata-vm-isolation}"
 apply_optimized_runtime_class
+install_gvisor
+install_firecracker
 
 if ! is_true "${DRY_RUN:-0}"; then
   verify_optimized_runtime_class
+  verify_runtime_class_handler "$gvisor_runtime_class" "$gvisor_handler"
+  verify_runtime_class_handler "$firecracker_runtime_class" "$firecracker_handler"
 fi

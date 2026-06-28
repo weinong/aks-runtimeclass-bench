@@ -133,5 +133,95 @@
     "P50": 3697,
     "P95": 4310,
     "P99": 4574
+  },
+  {
+    "metricName": "podLatencyQuantilesMeasurement",
+    "jobName": "runtimeclass-pod-latency-gvisor",
+    "quantileName": "PodScheduled",
+    "uuid": "fixture",
+    "P50": 18,
+    "P95": 24,
+    "P99": 78
+  },
+  {
+    "metricName": "podLatencyQuantilesMeasurement",
+    "jobName": "runtimeclass-pod-latency-gvisor",
+    "quantileName": "PodReadyToStartContainers",
+    "uuid": "fixture",
+    "P50": 130,
+    "P95": 155,
+    "P99": 180
+  },
+  {
+    "metricName": "podLatencyQuantilesMeasurement",
+    "jobName": "runtimeclass-pod-latency-gvisor",
+    "quantileName": "ContainersStarted",
+    "uuid": "fixture",
+    "P50": 230,
+    "P95": 280,
+    "P99": 340
+  },
+  {
+    "metricName": "podLatencyQuantilesMeasurement",
+    "jobName": "runtimeclass-pod-latency-gvisor",
+    "quantileName": "ContainersReady",
+    "uuid": "fixture",
+    "P50": 4090,
+    "P95": 4710,
+    "P99": 4974
+  },
+  {
+    "metricName": "podLatencyQuantilesMeasurement",
+    "jobName": "runtimeclass-pod-latency-gvisor",
+    "quantileName": "Ready",
+    "uuid": "fixture",
+    "P50": 4097,
+    "P95": 4710,
+    "P99": 4974
+  },
+  {
+    "metricName": "podLatencyQuantilesMeasurement",
+    "jobName": "runtimeclass-pod-latency-firecracker",
+    "quantileName": "PodScheduled",
+    "uuid": "fixture",
+    "P50": 25,
+    "P95": 32,
+    "P99": 88
+  },
+  {
+    "metricName": "podLatencyQuantilesMeasurement",
+    "jobName": "runtimeclass-pod-latency-firecracker",
+    "quantileName": "PodReadyToStartContainers",
+    "uuid": "fixture",
+    "P50": 170,
+    "P95": 195,
+    "P99": 220
+  },
+  {
+    "metricName": "podLatencyQuantilesMeasurement",
+    "jobName": "runtimeclass-pod-latency-firecracker",
+    "quantileName": "ContainersStarted",
+    "uuid": "fixture",
+    "P50": 300,
+    "P95": 360,
+    "P99": 430
+  },
+  {
+    "metricName": "podLatencyQuantilesMeasurement",
+    "jobName": "runtimeclass-pod-latency-firecracker",
+    "quantileName": "ContainersReady",
+    "uuid": "fixture",
+    "P50": 5290,
+    "P95": 5910,
+    "P99": 6174
+  },
+  {
+    "metricName": "podLatencyQuantilesMeasurement",
+    "jobName": "runtimeclass-pod-latency-firecracker",
+    "quantileName": "Ready",
+    "uuid": "fixture",
+    "P50": 5297,
+    "P95": 5910,
+    "P99": 6174
   }
 ]

@@ -1,0 +1,23 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: firecracker-pre-pull
+  namespace: runtimeclass-firecracker
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: firecracker-pre-pull
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: firecracker-pre-pull
+    spec:
+      runtimeClassName: __FIRECRACKER_RUNTIME_CLASS__
+      nodeSelector:
+        kubernetes.azure.com/agentpool: __FIRECRACKER_NODEPOOL_NAME__
+      tolerations:
+        - operator: Exists
+      containers:
+        - name: pause
+          image: mcr.microsoft.com/oss/v2/kubernetes/pause:3.10.2
+          command: ["/pause"]

@@ -92,3 +92,61 @@ jobs:
               key: "runtimeclass"
               operator: "Equal"
               value: "kata"
+  - name: runtimeclass-pod-latency-gvisor
+    jobIterations: 35
+    qps: 20
+    burst: 20
+    namespace: "runtimeclass-bench-gvisor"
+    namespacedIterations: false
+    cleanup: true
+    waitWhenFinished: true
+    podWait: true
+    objects:
+      - objectTemplate: "templates/runtimeclass-pod.yml"
+        replicas: 1
+        inputVars:
+          runtimeKey: "gvisor"
+          runtimeClass: "gvisor"
+          containerImage: "mcr.microsoft.com/oss/v2/kubernetes/pause:3.10.2"
+          command:
+            []
+          cpuRequest: "10m"
+          memoryRequest: "32Mi"
+          cpuLimit: "100m"
+          memoryLimit: "128Mi"
+          nodeSelector:
+            runtimeclass: "gvisor"
+          tolerations:
+            - effect: "NoSchedule"
+              key: "runtimeclass"
+              operator: "Equal"
+              value: "gvisor"
+  - name: runtimeclass-pod-latency-firecracker
+    jobIterations: 35
+    qps: 20
+    burst: 20
+    namespace: "runtimeclass-bench-firecracker"
+    namespacedIterations: false
+    cleanup: true
+    waitWhenFinished: true
+    podWait: true
+    objects:
+      - objectTemplate: "templates/runtimeclass-pod.yml"
+        replicas: 1
+        inputVars:
+          runtimeKey: "firecracker"
+          runtimeClass: "kata-fc"
+          containerImage: "mcr.microsoft.com/oss/v2/kubernetes/pause:3.10.2"
+          command:
+            []
+          cpuRequest: "10m"
+          memoryRequest: "32Mi"
+          cpuLimit: "100m"
+          memoryLimit: "128Mi"
+          nodeSelector:
+            runtimeclass: "firecracker"
+          tolerations:
+            - effect: "NoSchedule"
+              key: "runtimeclass"
+              operator: "Equal"
+              value: "firecracker"

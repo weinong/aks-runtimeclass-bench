@@ -7,6 +7,7 @@ This repository provisions an AKS cluster shape for runtime class benchmarking, 
 - `make`, `bash`, `python3`, `curl`, `tar`, and either `sha256sum` or `shasum` for local validation and tool installation.
 - Azure CLI logged in with access to the target subscription.
 - `kubectl` for credential validation and benchmark execution.
+- `helm` for installing the Kata Deploy chart used by the Firecracker-backed Kata runtime bootstrap.
 - Azure permissions to create resource groups, AKS clusters, node pools, and to fetch AKS credentials. Contributor on the benchmark resource group or equivalent scoped permissions is sufficient for the default workflow.
 - AKS pod sandboxing support for Kata runtime benchmarks. Public AKS pod sandboxing requires Kubernetes 1.27 or newer, Azure Linux node pools, and a Generation 2 VM size that supports nested virtualization. The default `VM_SIZE=Standard_D8s_v5` satisfies the suite's 8 vCPU minimum, but operators must confirm regional quota and feature availability.
 - Runtime support for gVisor and Firecracker in the target environment. Their AKS CLI flags are intentionally configurable through `GVISOR_NODEPOOL_EXTRA_ARGS` and `FIRECRACKER_NODEPOOL_EXTRA_ARGS` because support can be private, preview, or environment-specific.
@@ -22,7 +23,7 @@ make benchmark
 make cluster-delete RESOURCE_GROUP=rg-aks-rc-bench CLUSTER_NAME=aks-rc-bench
 ```
 
-Use `make benchmark-dry-run` to prepare the result-local kube-burner suite config and print the kube-burner command without contacting a cluster. By default, `make benchmark` runs the checked-in static suite from `configs/kube-burner-runtimeclass-suite.yml`, which includes the standard runtime baseline plus the Kata and optimized Kata runtime entries in one kube-burner invocation.
+Use `make benchmark-dry-run` to prepare the result-local kube-burner suite config and print the kube-burner command without contacting a cluster. By default, `make benchmark` runs the checked-in static suite from `configs/kube-burner-runtimeclass-suite.yml`, which includes the standard runtime baseline plus the Kata, optimized Kata, gVisor, and Firecracker-backed Kata runtime entries in one kube-burner invocation.
 
 ## Important Make Variables
 
@@ -46,6 +47,9 @@ Node pool variables:
 - `KATA_NODEPOOL_EXTRA_ARGS`, `GVISOR_NODEPOOL_EXTRA_ARGS`, `FIRECRACKER_NODEPOOL_EXTRA_ARGS`: Extra words appended to each runtime `az aks nodepool add` command. Kata defaults to `--workload-runtime KataVmIsolation`.
 - `KATA_OPTIMIZED_RUNTIME_CLASS`: Custom RuntimeClass applied by `make bootstrap-cluster`. Default: `kata-optimized`. If you override this, update `configs/kube-burner-runtimeclass-suite.yml` and `configs/runtime-manifest.json` to use the same runtime class name before benchmarking.
 - `KATA_OPTIMIZED_RUNTIME_OVERHEAD_MEMORY`: Fixed pod memory overhead for the optimized Kata RuntimeClass. Default: `32Mi`.
+- `GVISOR_RUNTIME_CLASS`: Repository-managed gVisor RuntimeClass applied by `make bootstrap-cluster`. Default: `gvisor`.
+- `FIRECRACKER_RUNTIME_CLASS`: Repository-managed Firecracker-backed Kata RuntimeClass applied by `make bootstrap-cluster`. Default: `kata-fc`; benchmark summaries use the runtime key `firecracker`.
+- `KATA_DEPLOY_CHART`: Helm chart reference used for Firecracker-backed Kata installation. Default: `oci://quay.io/kata-containers/kata-deploy-charts/kata-deploy`.
 
 kube-burner and workload variables:
 
@@ -66,6 +70,8 @@ The default runtime keys are:
 - `standard`: Standard-runtime baseline with no `runtimeClassName`.
 - `kata`: Kata runtime benchmark with runtime class, selector, and toleration defined in `configs/kube-burner-runtimeclass-suite.yml`.
 - `kata-optimized`: Custom Kata runtime benchmark using `runtimeClassName: kata-optimized`, handler `kata`, and `overhead.podFixed.memory: 32Mi`; it reuses the Kata node selector and toleration.
+- `gvisor`: gVisor benchmark using `runtimeClassName: gvisor`, handler `runsc`, and the gVisor node selector and toleration.
+- `firecracker`: Firecracker-backed Kata benchmark using `runtimeClassName: kata-fc`, handler `kata-fc`, and the Firecracker node selector and toleration.
 
 To change runtime topology, edit both checked-in benchmark inputs together:
 
@@ -85,8 +91,8 @@ The extractor fails if any required condition or P50/P95/P99 value is missing.
 
 1. Run `make validate` and confirm the extractor creates `results/validation/summary.json` and `results/validation/summary.csv` from fixture metrics.
 2. Run `make cluster-create` with the target Azure settings. Confirm the command completes and `az aks nodepool list --resource-group <rg> --cluster-name <cluster> --query '[].{name:name,count:count}'` reports `sys=2`, `kata=1`, `gvisor=1`, and `firecracker=1` unless you overrode node pool names.
-3. Run `make bootstrap-cluster` if you need to reapply repository-managed Kubernetes components after cluster credentials are configured. Set `KUBE_CONTEXT=<context>` to target a specific kube context. Confirm `kubectl get runtimeclass kata-optimized -o jsonpath='{.handler}{" "}{.overhead.podFixed.memory}'` prints `kata 32Mi`.
+3. Run `make bootstrap-cluster` if you need to reapply repository-managed Kubernetes components after cluster credentials are configured. Set `KUBE_CONTEXT=<context>` to target a specific kube context. Confirm `kubectl get runtimeclass kata-optimized -o jsonpath='{.handler}{" "}{.overhead.podFixed.memory}'` prints `kata 32Mi`, and confirm `kubectl get runtimeclass gvisor kata-fc` shows both repository-managed runtime classes. For exact handlers, `kubectl get runtimeclass gvisor -o jsonpath='{.handler}'` should print `runsc` and `kubectl get runtimeclass kata-fc -o jsonpath='{.handler}'` should print `kata-fc`.
 4. Run `make kube-burner-install` and confirm `tools/bin/kube-burner version` works.
 5. Run `make benchmark`.
-6. Confirm `results/<RUN_ID>/summary.json`, `results/<RUN_ID>/summary.csv`, and `results/<RUN_ID>/kube-burner.yml` exist, and that the summaries contain all five required pod latency conditions and P50/P95/P99 values for `standard`, `kata`, and `kata-optimized`.
+6. Confirm `results/<RUN_ID>/summary.json`, `results/<RUN_ID>/summary.csv`, and `results/<RUN_ID>/kube-burner.yml` exist, and that the summaries contain all five required pod latency conditions and P50/P95/P99 values for `standard`, `kata`, `kata-optimized`, `gvisor`, and `firecracker`.
 7. Run `make cluster-delete` with the same resource variables. Use `TEARDOWN_SCOPE=resource-group` only when the resource group is dedicated to the benchmark.

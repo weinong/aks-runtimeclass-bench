@@ -43,6 +43,14 @@ def assert_aggregate_summary(run_dir, expected_runtimes):
         p50_by_runtime.get("kata") != p50_by_runtime.get("kata-optimized"),
         "Kata and optimized Kata fixture quantiles must stay separated",
     )
+    require(
+        p50_by_runtime.get("kata-optimized") != p50_by_runtime.get("gvisor"),
+        "optimized Kata and gVisor fixture quantiles must stay separated",
+    )
+    require(
+        p50_by_runtime.get("gvisor") != p50_by_runtime.get("firecracker"),
+        "gVisor and Firecracker fixture quantiles must stay separated",
+    )
 
     rows = read_csv(run_dir / "summary.csv")
     row_keys = {row.get("runtime_key") for row in rows}
@@ -71,6 +79,8 @@ def main():
         "standard": "standard",
         "kata": "kata-vm-isolation",
         "kata-optimized": "kata-optimized",
+        "gvisor": "gvisor",
+        "firecracker": "kata-fc",
     }
     runtime_dirs = {key: run_dir / "runs" / key for key in expected_runtimes}
 
@@ -90,11 +100,17 @@ def main():
     require("name: runtimeclass-pod-latency-standard" in config_text, "config must include standard job")
     require("name: runtimeclass-pod-latency-kata" in config_text, "config must include Kata job")
     require("name: runtimeclass-pod-latency-kata-optimized" in config_text, "config must include optimized Kata job")
+    require("name: runtimeclass-pod-latency-gvisor" in config_text, "config must include gVisor job")
+    require("name: runtimeclass-pod-latency-firecracker" in config_text, "config must include Firecracker job")
     require('runtimeClass: ""' in config_text, "standard job must leave runtimeClass empty")
     require('runtimeClass: "kata-vm-isolation"' in config_text, "Kata job must include runtimeClass")
     require('runtimeClass: "kata-optimized"' in config_text, "optimized Kata job must include runtimeClass")
+    require('runtimeClass: "gvisor"' in config_text, "gVisor job must include runtimeClass")
+    require('runtimeClass: "kata-fc"' in config_text, "Firecracker job must include runtimeClass")
     require(config_text.count('runtimeclass: "kata"') >= 2, "Kata jobs must include node selectors")
-    require(config_text.count('key: "runtimeclass"') >= 2, "Kata jobs must include tolerations")
+    require('runtimeclass: "gvisor"' in config_text, "gVisor job must include node selector")
+    require('runtimeclass: "firecracker"' in config_text, "Firecracker job must include node selector")
+    require(config_text.count('key: "runtimeclass"') >= 4, "runtime jobs must include tolerations")
     require("runtimeClassName" not in config_text, "rendered config should not contain pod runtimeClassName directly")
 
     assert_runtime_manifest(args.source_manifest, expected_runtimes)

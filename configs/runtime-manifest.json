@@ -11,6 +11,14 @@
     {
       "key": "kata-optimized",
       "runtimeClass": "kata-optimized"
+    },
+    {
+      "key": "gvisor",
+      "runtimeClass": "gvisor"
+    },
+    {
+      "key": "firecracker",
+      "runtimeClass": "kata-fc"
     }
   ]
 }

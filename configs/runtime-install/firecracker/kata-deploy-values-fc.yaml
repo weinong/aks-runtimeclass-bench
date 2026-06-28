@@ -1,0 +1,16 @@
+shims:
+  disableAll: true
+  fc:
+    enabled: true
+    containerd:
+      snapshotter: devmapper
+runtimeClasses:
+  enabled: true
+  createDefault: false
+  overheadEnabled: true
+defaultShim:
+  amd64: fc
+nodeSelector:
+  kubernetes.azure.com/agentpool: __FIRECRACKER_NODEPOOL_NAME__
+tolerations:
+  - operator: Exists

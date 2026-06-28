@@ -1,0 +1,18 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: firecracker-smoke
+  namespace: runtimeclass-firecracker
+  labels:
+    app.kubernetes.io/name: firecracker-smoke
+spec:
+  runtimeClassName: __FIRECRACKER_RUNTIME_CLASS__
+  nodeSelector:
+    kubernetes.azure.com/agentpool: __FIRECRACKER_NODEPOOL_NAME__
+  tolerations:
+    - operator: Exists
+  restartPolicy: Never
+  containers:
+    - name: smoke
+      image: python:3.12-slim
+      command: ["python3", "-c", "print('firecracker smoke')"]
