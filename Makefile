@@ -40,8 +40,8 @@ KUBE_BURNER_ARCH ?= auto
 TOOLS_DIR ?= tools
 
 # Benchmark workload configuration.
-CONFIG_FILE ?= config/runtimeclass-pod-latency.yml
 POD_TEMPLATE ?= templates/runtimeclass-pod.yml
+BENCHMARK_RUNTIMES ?= standard kata
 RUNTIME_CLASS ?=
 NODE_SELECTOR ?=
 TOLERATIONS_JSON ?= []
@@ -80,7 +80,7 @@ help:
 	@printf '  make validate              Run local syntax, rendering, and extractor checks\n'
 	@printf '\nCommon overrides:\n'
 	@printf '  RESOURCE_GROUP=%s CLUSTER_NAME=%s LOCATION=%s VM_SIZE=%s\n' '$(RESOURCE_GROUP)' '$(CLUSTER_NAME)' '$(LOCATION)' '$(VM_SIZE)'
-	@printf '  RUNTIME_CLASS=%s NODE_SELECTOR=%s POD_COUNT=%s OUTPUT_DIR=%s\n' '$(RUNTIME_CLASS)' '$(NODE_SELECTOR)' '$(POD_COUNT)' '$(OUTPUT_DIR)'
+	@printf '  BENCHMARK_RUNTIMES=%s POD_COUNT=%s OUTPUT_DIR=%s\n' '$(BENCHMARK_RUNTIMES)' '$(POD_COUNT)' '$(OUTPUT_DIR)'
 
 cluster-create:
 	@scripts/cluster-create.sh
@@ -109,9 +109,9 @@ validate-shell:
 
 validate-config:
 	@mkdir -p results/validation
-	@scripts/render-user-data.py > results/validation/user-data.yml
-	@test -s results/validation/user-data.yml
-	@test -s $(CONFIG_FILE)
+	@scripts/render-kube-burner-config.py --runtime-manifest results/validation/runtime-manifest.json > results/validation/kube-burner.yml
+	@test -s results/validation/kube-burner.yml
+	@test -s results/validation/runtime-manifest.json
 	@test -s $(POD_TEMPLATE)
 
 test-extract:
@@ -121,11 +121,9 @@ test-extract:
 validate-benchmark-baseline:
 	@rm -rf results/validation-baseline
 	@mkdir -p results/validation-baseline
-	@$(MAKE) benchmark DRY_RUN=1 OUTPUT_DIR=results/validation-baseline RUN_ID=fixture RUNTIME_CLASS=kata-vm-isolation NODE_SELECTOR=runtimeclass=kata TOLERATIONS_JSON='[{"key":"runtimeclass","operator":"Equal","value":"kata","effect":"NoSchedule"}]' >/dev/null
-	@$(MAKE) benchmark DRY_RUN=1 OUTPUT_DIR=results/validation-baseline RUN_ID=fixture-default RUNTIME_CLASS= >/dev/null
-	@scripts/extract-results.py tests/fixtures/kube-burner-metrics --output-dir results/validation-baseline/fixture-standard --run-id fixture-standard
-	@scripts/extract-results.py tests/fixtures/kube-burner-metrics --output-dir results/validation-baseline/fixture-kata-vm-isolation --run-id fixture-kata-vm-isolation --runtime-class kata-vm-isolation
-	@python3 scripts/validate-benchmark-baseline.py --output-dir results/validation-baseline --run-id fixture --runtime-class kata-vm-isolation --baseline-only-run-id fixture-default
+	@$(MAKE) benchmark DRY_RUN=1 OUTPUT_DIR=results/validation-baseline RUN_ID=fixture >/dev/null
+	@scripts/extract-results.py tests/fixtures/kube-burner-suite-metrics --output-dir results/validation-baseline/fixture --run-id fixture --runtime-manifest results/validation-baseline/fixture/runtime-manifest.json
+	@python3 scripts/validate-benchmark-baseline.py --output-dir results/validation-baseline --run-id fixture
 
 clean-results:
 	@rm -rf results/*

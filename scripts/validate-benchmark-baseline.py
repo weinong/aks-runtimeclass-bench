@@ -2,12 +2,7 @@
 import argparse
 import csv
 import json
-import re
 from pathlib import Path
-
-
-def runtime_slug(value):
-    return re.sub(r"[^A-Za-z0-9_.-]", "-", value or "standard")
 
 
 def require(condition, message):
@@ -26,48 +21,58 @@ def read_csv(path):
         return list(csv.DictReader(handle))
 
 
-def assert_runtime_summary(run_dir, expected_runtime):
+def assert_aggregate_summary(run_dir, expected_runtimes):
     summary = read_json(run_dir / "summary.json")
+    runs = summary.get("runs")
+    require(isinstance(runs, list), f"{run_dir}/summary.json must contain a runs array")
+
+    actual = {run.get("runtimeKey"): run.get("runtimeClass") for run in runs}
+    require(actual == expected_runtimes, f"aggregate runtimes are {actual!r}, expected {expected_runtimes!r}")
+    p50_by_runtime = {}
+    for run in runs:
+        quantiles = run.get("quantiles")
+        require(isinstance(quantiles, list) and quantiles, f"aggregate run {run.get('runtimeKey')!r} must include quantiles")
+        ready = next((item for item in quantiles if item.get("condition") == "Ready"), None)
+        require(ready is not None, f"aggregate run {run.get('runtimeKey')!r} must include Ready quantiles")
+        p50_by_runtime[run.get("runtimeKey")] = ready.get("P50")
     require(
-        summary.get("runtimeClass") == expected_runtime,
-        f"{run_dir}/summary.json runtimeClass is {summary.get('runtimeClass')!r}, expected {expected_runtime!r}",
+        p50_by_runtime.get("standard") != p50_by_runtime.get("kata"),
+        "standard and Kata fixture quantiles must stay separated",
     )
 
     rows = read_csv(run_dir / "summary.csv")
-    require(rows, f"{run_dir}/summary.csv has no data rows")
-    mismatched = [row.get("runtime_class") for row in rows if row.get("runtime_class") != expected_runtime]
-    require(not mismatched, f"{run_dir}/summary.csv contains runtime_class values other than {expected_runtime!r}")
+    row_keys = {row.get("runtime_key") for row in rows}
+    require(row_keys == set(expected_runtimes), f"aggregate CSV runtime keys are {row_keys!r}, expected {set(expected_runtimes)!r}")
 
 
 def main():
     parser = argparse.ArgumentParser(description="Validate benchmark baseline dry-run and summary outputs")
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--run-id", required=True)
-    parser.add_argument("--runtime-class", required=True)
     parser.add_argument("--pod-template", type=Path, default=Path("templates/runtimeclass-pod.yml"))
-    parser.add_argument("--baseline-only-run-id")
     args = parser.parse_args()
 
-    standard_dir = args.output_dir / f"{args.run_id}-standard"
-    explicit_dir = args.output_dir / f"{args.run_id}-{runtime_slug(args.runtime_class)}"
+    run_dir = args.output_dir / args.run_id
+    expected_runtimes = {
+        "standard": "standard",
+        "kata": "kata-vm-isolation",
+    }
+    runtime_dirs = {key: run_dir / "runs" / key for key in expected_runtimes}
 
-    standard_user_data = standard_dir / "user-data.yml"
-    explicit_user_data = explicit_dir / "user-data.yml"
-    require(standard_user_data.is_file(), f"missing file: {standard_user_data}")
-    require(explicit_user_data.is_file(), f"missing file: {explicit_user_data}")
+    require(not any(path.exists() for path in runtime_dirs.values()), "suite benchmark must not create per-runtime result directories")
 
-    standard_text = standard_user_data.read_text(encoding="utf-8")
-    explicit_text = explicit_user_data.read_text(encoding="utf-8")
-    require('runtimeClass: ""' in standard_text, "standard baseline user data must leave runtimeClass empty")
-    require("nodeSelector:\n  {}" in standard_text, "standard baseline user data must leave nodeSelector empty")
-    require("tolerations:\n  []" in standard_text, "standard baseline user data must leave tolerations empty")
-    require("runtimeClassName" not in standard_text, "standard baseline user data must not include runtimeClassName")
-    require(
-        f'runtimeClass: "{args.runtime_class}"' in explicit_text,
-        f"explicit runtime user data must include runtimeClass {args.runtime_class!r}",
-    )
-    require('runtimeclass: "kata"' in explicit_text, "explicit runtime user data must include the requested node selector")
-    require('key: "runtimeclass"' in explicit_text, "explicit runtime user data must include the requested toleration")
+    rendered_config = run_dir / "kube-burner.yml"
+    runtime_manifest = run_dir / "runtime-manifest.json"
+    require(rendered_config.is_file(), f"missing file: {rendered_config}")
+    require(runtime_manifest.is_file(), f"missing file: {runtime_manifest}")
+    config_text = rendered_config.read_text(encoding="utf-8")
+    require("name: runtimeclass-pod-latency-standard" in config_text, "config must include standard job")
+    require("name: runtimeclass-pod-latency-kata" in config_text, "config must include Kata job")
+    require('runtimeClass: ""' in config_text, "standard job must leave runtimeClass empty")
+    require('runtimeClass: "kata-vm-isolation"' in config_text, "Kata job must include runtimeClass")
+    require('runtimeclass: "kata"' in config_text, "Kata job must include node selector")
+    require('key: "runtimeclass"' in config_text, "Kata job must include toleration")
+    require("runtimeClassName" not in config_text, "rendered config should not contain pod runtimeClassName directly")
 
     template_text = args.pod_template.read_text(encoding="utf-8")
     require(
@@ -75,19 +80,7 @@ def main():
         "pod template must guard runtimeClassName behind .runtimeClass",
     )
 
-    assert_runtime_summary(standard_dir, "standard")
-    assert_runtime_summary(explicit_dir, args.runtime_class)
-
-    if args.baseline_only_run_id:
-        baseline_only_dir = args.output_dir / args.baseline_only_run_id
-        duplicate_dir = args.output_dir / f"{args.baseline_only_run_id}-standard"
-        baseline_only_user_data = baseline_only_dir / "user-data.yml"
-        require(baseline_only_user_data.is_file(), f"missing file: {baseline_only_user_data}")
-        require(not duplicate_dir.exists(), f"baseline-only benchmark must not create duplicate directory: {duplicate_dir}")
-        baseline_only_text = baseline_only_user_data.read_text(encoding="utf-8")
-        require('runtimeClass: ""' in baseline_only_text, "baseline-only user data must leave runtimeClass empty")
-        require("nodeSelector:\n  {}" in baseline_only_text, "baseline-only user data must leave nodeSelector empty")
-        require("tolerations:\n  []" in baseline_only_text, "baseline-only user data must leave tolerations empty")
+    assert_aggregate_summary(run_dir, expected_runtimes)
 
 
 if __name__ == "__main__":
