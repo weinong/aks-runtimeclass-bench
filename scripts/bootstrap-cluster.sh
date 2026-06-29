@@ -157,9 +157,15 @@ install_gvisor() {
   [[ -n "$gvisor_nodepool_name" ]] || die "GVISOR_NODEPOOL_NAME must not be empty"
 
   log "Installing gVisor runtime on node pool $gvisor_nodepool_name"
+  if is_true "${DRY_RUN:-0}" || kubectl "${kubectl_args[@]}" get namespace runtimeclass-gvisor >/dev/null 2>&1; then
+    run_cmd kubectl "${kubectl_args[@]}" -n runtimeclass-gvisor delete daemonset/gvisor-installer --ignore-not-found
+    run_cmd kubectl "${kubectl_args[@]}" -n runtimeclass-gvisor delete pod -l app.kubernetes.io/name=gvisor-installer --ignore-not-found
+    run_cmd kubectl "${kubectl_args[@]}" -n runtimeclass-gvisor delete job/gvisor-installer pod/gvisor-smoke --ignore-not-found
+  fi
   apply_rendered_manifest "$REPO_ROOT/configs/runtime-install/gvisor/install.yaml"
+  run_cmd kubectl "${kubectl_args[@]}" -n runtimeclass-gvisor wait --for=condition=Complete job/gvisor-installer --timeout=10m
+  apply_rendered_manifest "$REPO_ROOT/configs/runtime-install/gvisor/smoke-pod.yaml"
   if ! is_true "${DRY_RUN:-0}"; then
-    run_cmd kubectl "${kubectl_args[@]}" -n runtimeclass-gvisor rollout status daemonset/gvisor-installer --timeout=10m
     wait_for_pod_succeeded runtimeclass-gvisor gvisor-smoke 10m
   fi
 }

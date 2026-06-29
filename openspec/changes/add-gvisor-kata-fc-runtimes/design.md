@@ -45,6 +45,17 @@ Alternatives considered:
 
 - Create `RuntimeClass/firecracker`. Rejected because it diverges from upstream and obscures that Firecracker is reached through Kata's `fc` shim.
 
+### Decision: Experimentally Disable Firecracker RuntimeClass CPU Overhead
+
+Keep Kata Deploy RuntimeClass overhead enabled for the Firecracker `fc` shim, but override `shims.fc.runtimeClass.overhead.cpu` to `"0"` in the repository-managed Helm values.
+
+Rationale: Kata Deploy's default `fc` RuntimeClass overhead includes a nonzero CPU reservation. For this benchmark experiment, that reservation is unnecessary and can distort pod latency comparisons by changing scheduled CPU capacity independently of the benchmark pod's own CPU request and limit. Keeping the knob in the values file makes the experiment explicit and easy to revisit if later runs show that a nonzero CPU overhead is needed for reliability.
+
+Alternatives considered:
+
+- Disable RuntimeClass overhead globally. Rejected because it would also remove the default memory overhead, while the current experiment only targets the unnecessary CPU reservation.
+- Add validation assertions for the CPU overhead value now. Deferred because the setting is experimental and may need adjustment after cluster runs.
+
 ### Decision: Keep Benchmark Key `firecracker`
 
 Keep the runtime manifest entry as `key: firecracker` and `runtimeClass: kata-fc`.

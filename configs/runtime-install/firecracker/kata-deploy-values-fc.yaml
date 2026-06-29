@@ -4,6 +4,9 @@ shims:
     enabled: true
     containerd:
       snapshotter: devmapper
+    runtimeClass:
+      overhead:
+        cpu: "0"
 runtimeClasses:
   enabled: true
   createDefault: false

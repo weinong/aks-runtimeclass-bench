@@ -9,15 +9,13 @@ kind: Namespace
 metadata:
   name: runtimeclass-gvisor
 ---
-apiVersion: apps/v1
-kind: DaemonSet
+apiVersion: batch/v1
+kind: Job
 metadata:
   name: gvisor-installer
   namespace: runtimeclass-gvisor
 spec:
-  selector:
-    matchLabels:
-      app.kubernetes.io/name: gvisor-installer
+  backoffLimit: 6
   template:
     metadata:
       labels:
@@ -28,7 +26,7 @@ spec:
         kubernetes.azure.com/agentpool: __GVISOR_NODEPOOL_NAME__
       tolerations:
         - operator: Exists
-      restartPolicy: Always
+      restartPolicy: OnFailure
       containers:
         - name: installer
           image: mcr.microsoft.com/azurelinux/busybox:1.36
@@ -40,10 +38,19 @@ spec:
             - -ceu
             - |
               chroot /host /usr/bin/nsenter --target 1 --mount --uts --ipc --net --pid -- sh -seu <<'HOST_SCRIPT'
+                marker=/var/lib/runtimeclass-bench/gvisor-installed
+                runsc_path=/usr/local/bin/runsc
+                shim_path=/usr/local/bin/containerd-shim-runsc-v1
+                conf_path=/etc/containerd/conf.d/99-runsc.toml
+                if [ -f "$marker" ] && [ -x "$runsc_path" ] && [ -x "$shim_path" ] && [ -f "$conf_path" ]; then
+                  exit 0
+                fi
                 command -v curl >/dev/null 2>&1 || { echo "curl is required to install gVisor binaries" >&2; exit 1; }
-                curl -fsSL -o /usr/local/bin/runsc https://storage.googleapis.com/gvisor/releases/release/latest/x86_64/runsc
-                curl -fsSL -o /usr/local/bin/containerd-shim-runsc-v1 https://storage.googleapis.com/gvisor/releases/release/latest/x86_64/containerd-shim-runsc-v1
-                chmod 0755 /usr/local/bin/runsc /usr/local/bin/containerd-shim-runsc-v1
+                curl -fsSL -o "${runsc_path}.tmp" https://storage.googleapis.com/gvisor/releases/release/latest/x86_64/runsc
+                curl -fsSL -o "${shim_path}.tmp" https://storage.googleapis.com/gvisor/releases/release/latest/x86_64/containerd-shim-runsc-v1
+                chmod 0755 "${runsc_path}.tmp" "${shim_path}.tmp"
+                mv "${runsc_path}.tmp" "$runsc_path"
+                mv "${shim_path}.tmp" "$shim_path"
                 mkdir -p /etc/containerd/conf.d
                 import_path='"/etc/containerd/conf.d/*.toml"'
                 if ! grep -Fq "$import_path" /etc/containerd/config.toml; then
@@ -74,10 +81,12 @@ spec:
                 printf "%s\n" \
                   "[plugins.\"io.containerd.cri.v1.runtime\".containerd.runtimes.runsc]" \
                   "  runtime_type = \"io.containerd.runsc.v1\"" \
-                  >/etc/containerd/conf.d/99-runsc.toml
+                  >"$conf_path"
+                mkdir -p "$(dirname "$marker")"
+                systemctl daemon-reload
                 systemctl restart containerd
+                touch "$marker"
               HOST_SCRIPT
-              sleep infinity
           volumeMounts:
             - name: host-root
               mountPath: /host
@@ -85,22 +94,3 @@ spec:
         - name: host-root
           hostPath:
             path: /
----
-apiVersion: v1
-kind: Pod
-metadata:
-  name: gvisor-smoke
-  namespace: runtimeclass-gvisor
-  labels:
-    app.kubernetes.io/name: gvisor-smoke
-spec:
-  runtimeClassName: gvisor
-  nodeSelector:
-    kubernetes.azure.com/agentpool: __GVISOR_NODEPOOL_NAME__
-  tolerations:
-    - operator: Exists
-  restartPolicy: Never
-  containers:
-    - name: smoke
-      image: mcr.microsoft.com/azurelinux/base/python:3
-      command: ["python3", "-c", "print('gvisor smoke')"]

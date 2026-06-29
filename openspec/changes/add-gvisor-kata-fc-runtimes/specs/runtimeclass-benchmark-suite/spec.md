@@ -22,6 +22,7 @@ The benchmark suite SHALL provide Make targets to create and tear down an AKS cl
 #### Scenario: Install Kata Firecracker runtime during bootstrap
 - **WHEN** cluster bootstrap runs
 - **THEN** the suite installs Firecracker-backed Kata runtime support on the configured Firecracker node pool and creates or updates a `kata-fc` RuntimeClass with handler `kata-fc`
+- **AND** the repository-managed Firecracker Kata Deploy values expose the `fc` RuntimeClass CPU overhead knob and set it to `0` for the current benchmark experiment
 
 #### Scenario: Bootstrap fresh benchmark cluster
 - **WHEN** an operator runs the cluster creation Make target with required Azure configuration

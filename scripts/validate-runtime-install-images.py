@@ -38,6 +38,8 @@ def main():
     files = sorted(RUNTIME_INSTALL_DIR.rglob("*.yaml"))
     require(files, f"missing runtime install manifests under {RUNTIME_INSTALL_DIR}")
     manifest_text = "\n".join(path.read_text(encoding="utf-8") for path in files)
+    gvisor_text = Path("configs/runtime-install/gvisor/install.yaml").read_text(encoding="utf-8")
+    bootstrap_text = Path("scripts/bootstrap-cluster.sh").read_text(encoding="utf-8")
     for path in files:
         validate_embedded_shell(path)
 
@@ -82,21 +84,58 @@ def main():
         "gVisor installer must merge conf.d into existing containerd imports instead of only adding imports when absent",
     )
     require(
-        'ensure_containerd_conf_import "${firecracker_nodepool_name}"' in Path("scripts/bootstrap-cluster.sh").read_text(encoding="utf-8"),
+        "/var/lib/runtimeclass-bench/gvisor-installed" in manifest_text
+        and "if [ -f \"$marker\" ]" in manifest_text,
+        "gVisor installer must skip host mutation after a successful install marker to avoid repeated containerd restarts",
+    )
+    require(
+        "kind: Job" in gvisor_text and "restartPolicy: OnFailure" in gvisor_text,
+        "gVisor installer must run as a retryable one-shot Job instead of a long-lived DaemonSet",
+    )
+    require(
+        "${runsc_path}.tmp" in manifest_text and "${shim_path}.tmp" in manifest_text,
+        "gVisor installer must download binaries to temporary files before replacing host binaries",
+    )
+    require(
+        "systemctl restart containerd" in gvisor_text
+        and "touch \"$marker\"" in gvisor_text
+        and gvisor_text.index("systemctl restart containerd") < gvisor_text.index("touch \"$marker\""),
+        "gVisor installer must write the success marker only after containerd restarts successfully",
+    )
+    require(
+        "delete daemonset/gvisor-installer --ignore-not-found" in bootstrap_text,
+        "bootstrap must delete the legacy gVisor installer DaemonSet before applying the Job",
+    )
+    require(
+        "delete job/gvisor-installer pod/gvisor-smoke --ignore-not-found" in bootstrap_text,
+        "bootstrap must recreate gVisor one-shot resources before waiting for installation and smoke validation",
+    )
+    require(
+        "configs/runtime-install/gvisor/smoke-pod.yaml" in bootstrap_text
+        and bootstrap_text.index("wait --for=condition=Complete job/gvisor-installer")
+        < bootstrap_text.index("configs/runtime-install/gvisor/smoke-pod.yaml"),
+        "bootstrap must create the gVisor smoke pod only after the installer Job completes",
+    )
+    require(
+        'ensure_containerd_conf_import "${firecracker_nodepool_name}"' in bootstrap_text,
         "bootstrap must preserve /etc/containerd/conf.d imports after Kata Deploy updates containerd imports",
     )
     require(
-        'get pods -l "$selector"' in Path("scripts/bootstrap-cluster.sh").read_text(encoding="utf-8"),
+        'get pods -l "$selector"' in bootstrap_text,
         "bootstrap must enumerate every installer pod before repairing node-local containerd imports",
     )
     require(
-        'line=$0' in Path("scripts/bootstrap-cluster.sh").read_text(encoding="utf-8")
-        and 'lines[NR]=line' in Path("scripts/bootstrap-cluster.sh").read_text(encoding="utf-8"),
+        'line=$0' in bootstrap_text
+        and 'lines[NR]=line' in bootstrap_text,
         "bootstrap must merge conf.d into existing containerd imports instead of appending a possibly nested TOML key",
     )
     require(
-        'exec -i "pod/$pod"' in Path("scripts/bootstrap-cluster.sh").read_text(encoding="utf-8"),
+        'exec -i "pod/$pod"' in bootstrap_text,
         "bootstrap must pass stdin to kubectl exec for each pod receiving the containerd import repair script",
+    )
+    require(
+        "wait --for=condition=Complete job/gvisor-installer" in bootstrap_text,
+        "bootstrap must wait for the gVisor installer Job to complete",
     )
 
 
