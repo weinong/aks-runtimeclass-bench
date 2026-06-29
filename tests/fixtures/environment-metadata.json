@@ -1,0 +1,61 @@
+{
+  "schemaVersion": "runtimeclass-benchmark-environment/v1",
+  "capturedAt": "2026-06-29T00:00:00Z",
+  "metadataSources": {
+    "nodePool": "kubernetes node label kubernetes.azure.com/agentpool",
+    "vmSku": "kubernetes node label node.kubernetes.io/instance-type",
+    "kernelVersion": "prometheus machine_info kernel_version label",
+    "kubeletVersion": "kubernetes node status nodeInfo.kubeletVersion",
+    "containerdVersion": "kubernetes node status nodeInfo.containerRuntimeVersion",
+    "kataVersion": "runtime-specific inspection"
+  },
+  "runtimeNodePools": {
+    "standard": "sys",
+    "kata": "kata",
+    "kata-optimized": "kata",
+    "gvisor": "gvisor",
+    "firecracker": "firecracker"
+  },
+  "nodePools": [
+    {
+      "name": "sys",
+      "vmSku": "Standard_D8s_v5",
+      "kernelVersion": "5.15.0-1092-azure",
+      "kubeletVersion": "v1.31.8",
+      "containerdVersion": "containerd://1.7.27",
+      "kataVersion": null,
+      "nodes": ["aks-sys-00000000-vmss000000"]
+    },
+    {
+      "name": "kata",
+      "vmSku": "Standard_D8s_v5",
+      "kernelVersion": "5.15.0-1092-azure",
+      "kubeletVersion": "v1.31.8",
+      "containerdVersion": "containerd://1.7.27",
+      "kataVersion": "3.17.0",
+      "nodes": ["aks-kata-00000000-vmss000000"]
+    },
+    {
+      "name": "gvisor",
+      "vmSku": "Standard_D8s_v5",
+      "kernelVersion": "5.15.0-1092-azure",
+      "kubeletVersion": "v1.31.8",
+      "containerdVersion": "containerd://1.7.27",
+      "kataVersion": null,
+      "nodes": ["aks-gvisor-00000000-vmss000000"]
+    },
+    {
+      "name": "firecracker",
+      "vmSku": "Standard_D8s_v5",
+      "kernelVersion": null,
+      "kubeletVersion": "v1.31.8",
+      "containerdVersion": "containerd://1.7.27",
+      "kataVersion": null,
+      "nodes": ["aks-firecracker-00000000-vmss000000"]
+    }
+  ],
+  "warnings": [
+    "node pool firecracker: kernel version unavailable from Prometheus machine_info",
+    "runtime firecracker: Kata runtime version unavailable"
+  ]
+}

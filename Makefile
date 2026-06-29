@@ -65,7 +65,7 @@ RUN_ID ?= runtimeclass-$(shell date -u +%Y%m%dT%H%M%SZ)
 CSV_OUTPUT ?= true
 DRY_RUN ?= 0
 
-.PHONY: help cluster-create bootstrap-cluster cluster-delete kube-burner-install prometheus-port-forward benchmark benchmark-with-port-forward benchmark-dry-run validate validate-make validate-shell validate-config validate-port-forward-targets validate-runtime-install-images test-extract validate-benchmark-baseline clean-results
+.PHONY: help cluster-create bootstrap-cluster cluster-delete kube-burner-install prometheus-port-forward benchmark benchmark-with-port-forward benchmark-dry-run validate validate-make validate-shell validate-config validate-port-forward-targets validate-runtime-install-images test-extract test-capture-metadata validate-benchmark-baseline clean-results
 
 help:
 	@printf 'AKS runtime class benchmark targets:\n'
@@ -106,7 +106,7 @@ benchmark-with-port-forward:
 benchmark-dry-run:
 	@$(MAKE) benchmark DRY_RUN=1
 
-validate: validate-make validate-shell validate-config validate-port-forward-targets validate-runtime-install-images test-extract validate-benchmark-baseline
+validate: validate-make validate-shell validate-config validate-port-forward-targets validate-runtime-install-images test-extract test-capture-metadata validate-benchmark-baseline
 
 validate-make:
 	@$(MAKE) --dry-run help >/dev/null
@@ -140,11 +140,15 @@ test-extract:
 	@mkdir -p results/validation
 	@scripts/extract-results.py tests/fixtures/kube-burner-metrics --output-dir results/validation --run-id fixture --runtime-class kata-vm-isolation
 
+test-capture-metadata:
+	@python3 -m unittest tests.test_capture_environment_metadata
+
 validate-benchmark-baseline:
 	@rm -rf results/validation-baseline
 	@mkdir -p results/validation-baseline
 	@$(MAKE) benchmark DRY_RUN=1 OUTPUT_DIR=results/validation-baseline RUN_ID=fixture >/dev/null
-	@scripts/extract-results.py tests/fixtures/kube-burner-suite-metrics --output-dir results/validation-baseline/fixture --run-id fixture --runtime-manifest results/validation-baseline/fixture/runtime-manifest.json
+	@cp tests/fixtures/environment-metadata.json results/validation-baseline/fixture/environment-metadata.json
+	@scripts/extract-results.py tests/fixtures/kube-burner-suite-metrics --output-dir results/validation-baseline/fixture --run-id fixture --runtime-manifest results/validation-baseline/fixture/runtime-manifest.json --environment-metadata results/validation-baseline/fixture/environment-metadata.json
 	@python3 scripts/validate-benchmark-baseline.py --output-dir results/validation-baseline --run-id fixture --prometheus-manifest "$(PROMETHEUS_MANIFEST)" --prometheus-metrics-profile "$(KUBE_BURNER_PROMETHEUS_METRICS_CONFIG)" --prometheus-endpoint "$(KUBE_BURNER_PROMETHEUS_ENDPOINT)"
 
 clean-results:

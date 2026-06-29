@@ -10,6 +10,14 @@ run_dir="$REPO_ROOT/${OUTPUT_DIR:-results}/$requested_run_id"
 raw_dir="$run_dir/raw"
 rendered_config="$run_dir/kube-burner.yml"
 runtime_manifest="$run_dir/runtime-manifest.json"
+environment_metadata="$run_dir/environment-metadata.json"
+metadata_runtime_node_pools=(
+  "standard=${SYSTEM_NODEPOOL_NAME:-sys}"
+  "kata=${KATA_NODEPOOL_NAME:-kata}"
+  "kata-optimized=${KATA_NODEPOOL_NAME:-kata}"
+  "gvisor=${GVISOR_NODEPOOL_NAME:-gvisor}"
+  "firecracker=${FIRECRACKER_NODEPOOL_NAME:-firecracker}"
+)
 suite_config="$REPO_ROOT/${KUBE_BURNER_CONFIG:-configs/kube-burner-runtimeclass-suite.yml}"
 suite_manifest="$REPO_ROOT/${RUNTIME_MANIFEST:-configs/runtime-manifest.json}"
 metrics_placeholder="__METRICS_DIR__"
@@ -81,14 +89,43 @@ fi
 if is_true "${DRY_RUN:-0}"; then
   log "DRY_RUN=1: not invoking kube-burner for $requested_run_id"
   print_cmd "${cmd[@]}"
+  log "DRY_RUN=1: not capturing environment metadata for $requested_run_id"
+  dry_run_capture_cmd=("$SCRIPT_DIR/capture-environment-metadata.py" --output "$environment_metadata" --runtime-manifest "$runtime_manifest" --prometheus-endpoint "$prometheus_endpoint")
+  for mapping in "${metadata_runtime_node_pools[@]}"; do
+    dry_run_capture_cmd+=(--runtime-node-pool "$mapping")
+  done
+  if [[ -n "${KATA_VERSION:-}" ]]; then
+    dry_run_capture_cmd+=(--kata-version "${KATA_NODEPOOL_NAME:-kata}=$KATA_VERSION")
+  fi
+  if [[ -n "${FIRECRACKER_KATA_VERSION:-}" ]]; then
+    dry_run_capture_cmd+=(--kata-version "${FIRECRACKER_NODEPOOL_NAME:-firecracker}=$FIRECRACKER_KATA_VERSION")
+  fi
+  print_cmd "${dry_run_capture_cmd[@]}"
   log "DRY_RUN=1: not extracting benchmark summaries for $requested_run_id"
-  print_cmd "$SCRIPT_DIR/extract-results.py" "$raw_dir" --output-dir "$run_dir" --run-id "$requested_run_id" --runtime-manifest "$runtime_manifest"
+  print_cmd "$SCRIPT_DIR/extract-results.py" "$raw_dir" --output-dir "$run_dir" --run-id "$requested_run_id" --runtime-manifest "$runtime_manifest" --environment-metadata "$environment_metadata"
   exit 0
 fi
 
+capture_cmd=("$SCRIPT_DIR/capture-environment-metadata.py" --output "$environment_metadata" --runtime-manifest "$runtime_manifest" --prometheus-endpoint "$prometheus_endpoint")
+for mapping in "${metadata_runtime_node_pools[@]}"; do
+  capture_cmd+=(--runtime-node-pool "$mapping")
+done
+if [[ -n "${KUBECONFIG:-}" ]]; then
+  capture_cmd+=(--kubeconfig "$KUBECONFIG")
+fi
+if [[ -n "${KUBE_CONTEXT:-}" ]]; then
+  capture_cmd+=(--kube-context "$KUBE_CONTEXT")
+fi
+if [[ -n "${KATA_VERSION:-}" ]]; then
+  capture_cmd+=(--kata-version "${KATA_NODEPOOL_NAME:-kata}=$KATA_VERSION")
+fi
+if [[ -n "${FIRECRACKER_KATA_VERSION:-}" ]]; then
+  capture_cmd+=(--kata-version "${FIRECRACKER_NODEPOOL_NAME:-firecracker}=$FIRECRACKER_KATA_VERSION")
+fi
+run_cmd "${capture_cmd[@]}"
 run_cmd "${cmd[@]}"
 
-extract_cmd=("$SCRIPT_DIR/extract-results.py" "$raw_dir" --output-dir "$run_dir" --run-id "$requested_run_id" --runtime-manifest "$runtime_manifest")
+extract_cmd=("$SCRIPT_DIR/extract-results.py" "$raw_dir" --output-dir "$run_dir" --run-id "$requested_run_id" --runtime-manifest "$runtime_manifest" --environment-metadata "$environment_metadata")
 if ! is_true "${CSV_OUTPUT:-true}"; then
   extract_cmd+=(--no-csv)
 fi

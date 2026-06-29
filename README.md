@@ -70,6 +70,8 @@ kube-burner and workload variables:
 - `KUBE_BURNER_PROMETHEUS_ENDPOINT`: Prometheus endpoint rendered into the per-run kube-burner config. Default: `http://$(PROMETHEUS_PORT_FORWARD_ADDRESS):$(PROMETHEUS_LOCAL_PORT)`.
 - `KUBE_BURNER_PROMETHEUS_METRICS_CONFIG`: Repo-relative kube-burner metrics profile for kubelet startup metrics. Default: `configs/kubelet-startup-metrics.yml`.
 - `RUNTIME_MANIFEST`: Repo-relative static runtime key and label manifest copied into each result root for extraction. Default: `configs/runtime-manifest.json`.
+- `KATA_VERSION`: Optional Kata runtime version value recorded for the configured Kata node pool in `environment-metadata.json`.
+- `FIRECRACKER_KATA_VERSION`: Optional Kata runtime version value recorded for the configured Firecracker node pool in `environment-metadata.json`.
 - `BENCHMARK_TIMEOUT`: Timeout passed to `kube-burner init`. Default: `4h`.
 - `OUTPUT_DIR`: Result root. Default: `results`.
 - `RUN_ID`: Benchmark UUID and per-run directory name. Defaults to a UTC timestamp.
@@ -93,13 +95,14 @@ To change runtime topology, edit both checked-in benchmark inputs together:
 - Add or remove matching runtime entries in `configs/runtime-manifest.json` so the extractor expects the same runtime keys.
 - Keep the `__METRICS_DIR__`, `__PROMETHEUS_ENDPOINT__`, and `__PROMETHEUS_METRICS_CONFIG__` placeholders in the static suite config; `make benchmark` replaces them with the run's raw metrics directory, configured Prometheus endpoint, and metrics profile path.
 
-- `summary.json`: Aggregate run metadata for every runtime entry. Each run includes `quantiles` for required pod latency conditions and `kubeletMetricQuantiles` for configured kubelet startup metric families.
-- `summary.csv`: Aggregate rows for `run_id`, `runtime_key`, `runtime_class`, `metric_category`, `condition`, `metric_name`, `metric_family`, `unit`, `p50`, `p95`, and `p99` when `CSV_OUTPUT=true`. Pod latency rows use `metric_category=pod_latency` and set `condition`; kubelet startup metric rows use `metric_category=kubelet_metric` and set `metric_name`, `metric_family`, and `unit`.
+- `environment-metadata.json`: Result-local environment metadata captured before kube-burner runs. It records the schema version, capture timestamp, metadata source descriptions, runtime-to-node-pool attribution, node pool metadata, and warnings for unavailable optional fields. Node pool and VM SKU come from Kubernetes node labels such as `kubernetes.azure.com/agentpool` and `node.kubernetes.io/instance-type`; kernel version comes from retained Prometheus `machine_info` labels when available; containerd version comes from Kubernetes node status `nodeInfo.containerRuntimeVersion`; kubelet version comes from Kubernetes node status `nodeInfo.kubeletVersion`; Kata version comes from runtime-specific inspection input when available and is otherwise `null` with a warning.
+- `summary.json`: Aggregate run metadata for every runtime entry. Each run includes `quantiles` for required pod latency conditions, `kubeletMetricQuantiles` for configured kubelet startup metric families, and runtime node-pool environment metadata when `environment-metadata.json` is passed to the extractor. The top-level `environment` object preserves the full captured metadata and warnings.
+- `summary.csv`: Aggregate rows for `run_id`, `runtime_key`, `runtime_class`, `metric_category`, `condition`, `metric_name`, `metric_family`, `unit`, `node_pool`, `vm_sku`, `kernel_version`, `containerd_version`, `kubelet_version`, `kata_version`, `p50`, `p95`, and `p99` when `CSV_OUTPUT=true`. Pod latency rows use `metric_category=pod_latency` and set `condition`; kubelet startup metric rows use `metric_category=kubelet_metric` and set `metric_name`, `metric_family`, and `unit`. Unavailable metadata is `null` in JSON and an empty cell in CSV.
 - `kube-burner.yml`: Static kube-burner suite config prepared for the invocation.
 - `runtime-manifest.json`: Copied runtime keys and summary labels used by the extractor.
 - `raw/`: kube-burner local metrics output.
 
-The Prometheus metrics profile queries these kubelet metric families from the configured Prometheus endpoint: `kubelet_run_podsandbox_duration_seconds`, `kubelet_pod_start_sli_duration_seconds`, and `kubelet_pod_start_total_duration_seconds`, including `_bucket`, `_sum`, and `_count` series where present. The extractor derives P50, P95, and P99 duration values from the collected histogram buckets for each runtime entry and writes them under `kubeletMetricQuantiles` in JSON and as `kubelet_metric` rows in CSV.
+The Prometheus metrics profile queries these kubelet metric families from the configured Prometheus endpoint: `kubelet_run_podsandbox_duration_seconds`, `kubelet_pod_start_sli_duration_seconds`, and `kubelet_pod_start_total_duration_seconds`, including `_bucket`, `_sum`, and `_count` series where present. It also retains `machine_info` so environment metadata capture can use Prometheus-backed kernel labels when available. The extractor derives P50, P95, and P99 duration values from the collected histogram buckets for each runtime entry and writes them under `kubeletMetricQuantiles` in JSON and as `kubelet_metric` rows in CSV.
 
 Each runtime job uses `metricsClosing: afterJobPause` and `jobPause: 20s` so Prometheus has time to scrape at least once after fast jobs complete. Keep this pause longer than the Prometheus scrape interval; otherwise fast runtime jobs can produce zero bucket deltas and the extractor will fail rather than report misleading kubelet metric quantiles.
 
@@ -122,6 +125,6 @@ curl -G 'http://127.0.0.1:9090/api/v1/query' --data-urlencode 'query=kubelet_pod
 ```
 
 8. Run `make benchmark`.
-9. Confirm `results/<RUN_ID>/summary.json`, `results/<RUN_ID>/summary.csv`, and `results/<RUN_ID>/kube-burner.yml` exist, and that the summaries contain all five required pod latency conditions plus P50/P95/P99 kubelet startup metric values for `standard`, `kata`, `kata-optimized`, `gvisor`, and `firecracker`.
+9. Confirm `results/<RUN_ID>/environment-metadata.json`, `results/<RUN_ID>/summary.json`, `results/<RUN_ID>/summary.csv`, and `results/<RUN_ID>/kube-burner.yml` exist, and that the summaries contain all five required pod latency conditions plus P50/P95/P99 kubelet startup metric values for `standard`, `kata`, `kata-optimized`, `gvisor`, and `firecracker`.
 10. Confirm the rendered `results/<RUN_ID>/kube-burner.yml` contains the configured Prometheus endpoint and references `configs/kubelet-startup-metrics.yml`; confirm that metrics profile contains the three kubelet startup metric queries.
 11. Run `make cluster-delete` with the same resource variables. Use `TEARDOWN_SCOPE=resource-group` only when the resource group is dedicated to the benchmark.

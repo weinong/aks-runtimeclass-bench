@@ -67,6 +67,26 @@ data:
           - source_labels: [__name__]
             action: keep
             regex: (kubelet_run_podsandbox_duration_seconds|kubelet_pod_start_sli_duration_seconds|kubelet_pod_start_total_duration_seconds)(_bucket|_sum|_count)?
+      - job_name: kubelet-cadvisor
+        scheme: https
+        metrics_path: /metrics/cadvisor
+        bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+        tls_config:
+          ca_file: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+        kubernetes_sd_configs:
+          - role: node
+        relabel_configs:
+          - action: labelmap
+            regex: __meta_kubernetes_node_label_(.+)
+          - source_labels: [__meta_kubernetes_node_address_InternalIP]
+            target_label: __address__
+            replacement: ${1}:10250
+          - source_labels: [__meta_kubernetes_node_name]
+            target_label: node
+        metric_relabel_configs:
+          - source_labels: [__name__]
+            action: keep
+            regex: machine_info
 ---
 apiVersion: apps/v1
 kind: Deployment

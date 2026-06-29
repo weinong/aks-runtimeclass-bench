@@ -4,3 +4,5 @@
   metricName: kubeletPodStartSliDurationSeconds
 - query: '{__name__=~"kubelet_pod_start_total_duration_seconds(_bucket|_sum|_count)?"}'
   metricName: kubeletPodStartTotalDurationSeconds
+- query: 'machine_info'
+  metricName: nodeMachineInfo

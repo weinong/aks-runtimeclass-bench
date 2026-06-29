@@ -80,6 +80,8 @@ def assert_aggregate_summary(run_dir, expected_runtimes):
         runtime_rows = [row for row in rows if row.get("runtime_key") == key]
         pod_rows = [row for row in runtime_rows if row.get("metric_category") == "pod_latency"]
         kubelet_rows = [row for row in runtime_rows if row.get("metric_category") == "kubelet_metric"]
+        for field in ["node_pool", "vm_sku", "kernel_version", "containerd_version", "kubelet_version", "kata_version"]:
+            require(field in rows[0], f"aggregate CSV must include environment metadata column {field!r}")
         require(len(pod_rows) == 5, f"aggregate CSV runtime {key!r} must include 5 pod latency rows")
         actual_families = {row.get("metric_family") for row in kubelet_rows}
         require(
@@ -97,6 +99,34 @@ def assert_runtime_manifest(path, expected_runtimes):
     require(isinstance(runtimes, list), f"{path} must contain a runtimes array")
     actual = {runtime.get("key"): runtime.get("runtimeClass") for runtime in runtimes}
     require(actual == expected_runtimes, f"runtime manifest is {actual!r}, expected {expected_runtimes!r}")
+
+
+def assert_environment_metadata(path, expected_runtimes):
+    metadata = read_json(path)
+    require(
+        metadata.get("schemaVersion") == "runtimeclass-benchmark-environment/v1",
+        f"{path} must declare the environment metadata schema version",
+    )
+    require(isinstance(metadata.get("capturedAt"), str) and metadata.get("capturedAt"), f"{path} must include capturedAt")
+    require("cluster" not in metadata, f"{path} must not include cluster metadata")
+    require(isinstance(metadata.get("metadataSources"), dict), f"{path} must include metadataSources")
+    require(
+        metadata["metadataSources"].get("kubeletVersion") == "kubernetes node status nodeInfo.kubeletVersion",
+        f"{path} must document kubeletVersion metadata source",
+    )
+    require(
+        metadata.get("runtimeNodePools") == {
+            "standard": "sys",
+            "kata": "kata",
+            "kata-optimized": "kata",
+            "gvisor": "gvisor",
+            "firecracker": "firecracker",
+        },
+        f"{path} runtimeNodePools must map default runtimes to node pools",
+    )
+    require(set(metadata.get("runtimeNodePools", {})) == set(expected_runtimes), f"{path} must map every runtime")
+    require(isinstance(metadata.get("nodePools"), list), f"{path} must include nodePools")
+    require(isinstance(metadata.get("warnings"), list), f"{path} must include warnings")
 
 
 def assert_prometheus_inputs(manifest_path, metrics_profile_path, source_config_text, rendered_config_text, expected_endpoint):
@@ -120,6 +150,7 @@ def assert_prometheus_inputs(manifest_path, metrics_profile_path, source_config_
         "kubernetes_sd_configs:",
         "role: node",
         "metrics_path: /metrics",
+        "metrics_path: /metrics/cadvisor",
         "bearer_token_file:",
         "__PROMETHEUS_SYSTEM_NODE_SELECTOR_KEY__",
         "__PROMETHEUS_SYSTEM_NODE_SELECTOR_VALUE__",
@@ -129,12 +160,14 @@ def assert_prometheus_inputs(manifest_path, metrics_profile_path, source_config_
         require(f"- {forbidden_resource}" not in manifest_text, f"Prometheus RBAC must not grant {forbidden_resource}")
     for family in required_metric_families:
         require(family in manifest_text, f"Prometheus manifest must retain {family}")
+    require("machine_info" in manifest_text, "Prometheus manifest must retain machine_info for kernel metadata")
     require("_bucket|_sum|_count" in manifest_text, "Prometheus relabeling must retain histogram bucket/sum/count series")
 
     require(metrics_profile_path.is_file(), f"missing file: {metrics_profile_path}")
     metrics_profile_text = metrics_profile_path.read_text(encoding="utf-8")
     for family in required_metric_families:
         require(family in metrics_profile_text, f"kube-burner metrics profile must query {family}")
+    require("machine_info" in metrics_profile_text, "kube-burner metrics profile must query machine_info")
 
     require("__PROMETHEUS_ENDPOINT__" in source_config_text, "static suite config must include the Prometheus endpoint placeholder")
     require("__PROMETHEUS_METRICS_CONFIG__" in source_config_text, "static suite config must include the Prometheus metrics profile placeholder")
@@ -175,10 +208,12 @@ def main():
 
     rendered_config = run_dir / "kube-burner.yml"
     runtime_manifest = run_dir / "runtime-manifest.json"
+    environment_metadata = run_dir / "environment-metadata.json"
     require(args.suite_config.is_file(), f"missing file: {args.suite_config}")
     require(args.source_manifest.is_file(), f"missing file: {args.source_manifest}")
     require(rendered_config.is_file(), f"missing file: {rendered_config}")
     require(runtime_manifest.is_file(), f"missing file: {runtime_manifest}")
+    require(environment_metadata.is_file(), f"missing file: {environment_metadata}")
     source_config_text = args.suite_config.read_text(encoding="utf-8")
     require("__METRICS_DIR__" in source_config_text, "static suite config must include the metrics directory placeholder")
     config_text = rendered_config.read_text(encoding="utf-8")
@@ -218,6 +253,7 @@ def main():
 
     assert_runtime_manifest(args.source_manifest, expected_runtimes)
     assert_runtime_manifest(runtime_manifest, expected_runtimes)
+    assert_environment_metadata(environment_metadata, expected_runtimes)
 
     template_text = args.pod_template.read_text(encoding="utf-8")
     require(

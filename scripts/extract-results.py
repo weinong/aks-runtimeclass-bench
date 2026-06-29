@@ -34,6 +34,7 @@ KUBELET_STARTUP_METRICS = [
 ]
 KUBELET_METRIC_FAMILIES = {metric["metricFamily"] for metric in KUBELET_STARTUP_METRICS}
 KUBELET_METRIC_NAME_TO_FAMILY = {metric["metricName"]: metric["metricFamily"] for metric in KUBELET_STARTUP_METRICS}
+ENVIRONMENT_CSV_FIELDS = ["node_pool", "vm_sku", "kernel_version", "containerd_version", "kubelet_version", "kata_version"]
 
 
 def iter_json_values(path):
@@ -339,7 +340,53 @@ def load_runtime_manifest(path):
     return runtimes
 
 
-def build_suite_summary(records, kubelet_records, input_dir, run_id, runtime_manifest):
+def load_environment_metadata(path):
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise SystemExit(f"failed to parse environment metadata {path}: {exc}") from exc
+    if not isinstance(data, dict):
+        raise SystemExit(f"environment metadata {path} must contain a JSON object")
+    return data
+
+
+def runtime_environment(environment_metadata, runtime_key):
+    if not environment_metadata:
+        return None
+    runtime_node_pools = environment_metadata.get("runtimeNodePools")
+    node_pools = environment_metadata.get("nodePools")
+    if not isinstance(runtime_node_pools, dict) or not isinstance(node_pools, list):
+        return None
+    node_pool_name = runtime_node_pools.get(runtime_key)
+    if not isinstance(node_pool_name, str) or not node_pool_name:
+        return None
+    node_pool = next((item for item in node_pools if isinstance(item, dict) and item.get("name") == node_pool_name), None)
+    if node_pool is None:
+        return {"nodePool": node_pool_name, "vmSku": None, "kernelVersion": None, "containerdVersion": None, "kubeletVersion": None, "kataVersion": None}
+    return {
+        "nodePool": node_pool_name,
+        "vmSku": node_pool.get("vmSku"),
+        "kernelVersion": node_pool.get("kernelVersion"),
+        "containerdVersion": node_pool.get("containerdVersion"),
+        "kubeletVersion": node_pool.get("kubeletVersion"),
+        "kataVersion": node_pool.get("kataVersion"),
+        "nodes": node_pool.get("nodes", []),
+    }
+
+
+def environment_csv_values(run):
+    environment = run.get("environment") or {}
+    return {
+        "node_pool": environment.get("nodePool") or "",
+        "vm_sku": environment.get("vmSku") or "",
+        "kernel_version": environment.get("kernelVersion") or "",
+        "containerd_version": environment.get("containerdVersion") or "",
+        "kubelet_version": environment.get("kubeletVersion") or "",
+        "kata_version": environment.get("kataVersion") or "",
+    }
+
+
+def build_suite_summary(records, kubelet_records, input_dir, run_id, runtime_manifest, environment_metadata=None):
     expected_keys = {runtime["key"] for runtime in runtime_manifest}
     keyed_records = [record for record in records if record_runtime_key(record, expected_keys) is not None]
     validate_kubelet_metric_runtime_attribution(kubelet_records, expected_keys)
@@ -354,23 +401,28 @@ def build_suite_summary(records, kubelet_records, input_dir, run_id, runtime_man
         runtime_records = records if not use_keyed_records else keyed_records
         quantiles = build_runtime_quantiles(runtime_records, key if use_keyed_records else None, expected_keys)
         kubelet_metric_quantiles = build_kubelet_metric_quantiles(kubelet_records, key, expected_keys, required=True)
-        runs.append(
-            {
-                "runtimeKey": key,
-                "runtimeClass": runtime["runtimeClass"],
-                "runId": f"{run_id}-{key}",
-                "sourceDirectory": str(input_dir),
-                "quantiles": quantiles,
-                "kubeletMetricQuantiles": kubelet_metric_quantiles,
-            }
-        )
+        run = {
+            "runtimeKey": key,
+            "runtimeClass": runtime["runtimeClass"],
+            "runId": f"{run_id}-{key}",
+            "sourceDirectory": str(input_dir),
+            "quantiles": quantiles,
+            "kubeletMetricQuantiles": kubelet_metric_quantiles,
+        }
+        environment = runtime_environment(environment_metadata, key)
+        if environment is not None:
+            run["environment"] = environment
+        runs.append(run)
 
-    return {
+    summary = {
         "runId": run_id,
         "sourceDirectory": str(input_dir),
         "generatedAt": datetime.now(timezone.utc).isoformat(),
         "runs": runs,
     }
+    if environment_metadata is not None:
+        summary["environment"] = environment_metadata
+    return summary
 
 
 def write_csv(summary, path):
@@ -403,6 +455,7 @@ def write_suite_csv(summary, path):
                 "metric_name",
                 "metric_family",
                 "unit",
+                *ENVIRONMENT_CSV_FIELDS,
                 "p50",
                 "p95",
                 "p99",
@@ -410,6 +463,7 @@ def write_suite_csv(summary, path):
         )
         writer.writeheader()
         for run in summary["runs"]:
+            environment = environment_csv_values(run)
             for item in run["quantiles"]:
                 writer.writerow(
                     {
@@ -421,6 +475,7 @@ def write_suite_csv(summary, path):
                         "metric_name": "",
                         "metric_family": "",
                         "unit": "",
+                        **environment,
                         "p50": item["P50"],
                         "p95": item["P95"],
                         "p99": item["P99"],
@@ -437,6 +492,7 @@ def write_suite_csv(summary, path):
                         "metric_name": item["metricName"],
                         "metric_family": item["metricFamily"],
                         "unit": item["unit"],
+                        **environment,
                         "p50": item["P50"],
                         "p95": item["P95"],
                         "p99": item["P99"],
@@ -451,6 +507,7 @@ def main():
     parser.add_argument("--run-id", required=True)
     parser.add_argument("--runtime-class", default="")
     parser.add_argument("--runtime-manifest", type=Path)
+    parser.add_argument("--environment-metadata", type=Path)
     parser.add_argument("--no-csv", action="store_true")
     args = parser.parse_args()
 
@@ -461,8 +518,16 @@ def main():
     if not records:
         raise SystemExit(f"no podLatencyQuantilesMeasurement records found under {args.input_dir}")
 
+    environment_metadata = load_environment_metadata(args.environment_metadata) if args.environment_metadata else None
     if args.runtime_manifest:
-        summary = build_suite_summary(records, kubelet_records, args.input_dir, args.run_id, load_runtime_manifest(args.runtime_manifest))
+        summary = build_suite_summary(
+            records,
+            kubelet_records,
+            args.input_dir,
+            args.run_id,
+            load_runtime_manifest(args.runtime_manifest),
+            environment_metadata,
+        )
     else:
         summary = build_single_summary(records, args.input_dir, args.run_id, args.runtime_class)
     args.output_dir.mkdir(parents=True, exist_ok=True)

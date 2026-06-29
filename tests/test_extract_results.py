@@ -11,6 +11,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 EXTRACT_RESULTS = REPO_ROOT / "scripts" / "extract-results.py"
 SUITE_FIXTURE = REPO_ROOT / "tests" / "fixtures" / "kube-burner-suite-metrics"
 RUNTIME_MANIFEST = REPO_ROOT / "configs" / "runtime-manifest.json"
+ENVIRONMENT_METADATA = REPO_ROOT / "tests" / "fixtures" / "environment-metadata.json"
 
 
 def read_csv(path):
@@ -26,7 +27,54 @@ def scrub_summary(summary):
     return summary
 
 
+def read_expected_suite_summary():
+    summary = json.loads((REPO_ROOT / "tests" / "fixtures" / "expected-suite-summary.json").read_text(encoding="utf-8"))
+    return scrub_summary(summary)
+
+
 class ExtractResultsTests(unittest.TestCase):
+    def test_suite_summary_includes_environment_metadata_when_provided(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            output_dir = Path(tmp)
+            subprocess.run(
+                [
+                    sys.executable,
+                    str(EXTRACT_RESULTS),
+                    str(SUITE_FIXTURE),
+                    "--output-dir",
+                    str(output_dir),
+                    "--run-id",
+                    "fixture",
+                    "--runtime-manifest",
+                    str(RUNTIME_MANIFEST),
+                    "--environment-metadata",
+                    str(ENVIRONMENT_METADATA),
+                ],
+                check=True,
+                cwd=REPO_ROOT,
+            )
+
+            summary = json.loads((output_dir / "summary.json").read_text(encoding="utf-8"))
+            self.assertEqual(summary["environment"]["schemaVersion"], "runtimeclass-benchmark-environment/v1")
+            self.assertNotIn("cluster", summary["environment"])
+            self.assertIn("runtime firecracker: Kata runtime version unavailable", summary["environment"]["warnings"])
+
+            by_key = {run["runtimeKey"]: run for run in summary["runs"]}
+            self.assertEqual(by_key["standard"]["environment"]["nodePool"], "sys")
+            self.assertEqual(by_key["standard"]["environment"]["kubeletVersion"], "v1.31.8")
+            self.assertEqual(by_key["kata"]["environment"]["kataVersion"], "3.17.0")
+            self.assertIsNone(by_key["firecracker"]["environment"]["kernelVersion"])
+            self.assertIsNone(by_key["firecracker"]["environment"]["kataVersion"])
+
+            rows = read_csv(output_dir / "summary.csv")
+            self.assertEqual(rows[0]["node_pool"], "sys")
+            self.assertEqual(rows[0]["vm_sku"], "Standard_D8s_v5")
+            self.assertEqual(rows[0]["kernel_version"], "5.15.0-1092-azure")
+            self.assertEqual(rows[0]["kubelet_version"], "v1.31.8")
+            firecracker_row = next(row for row in rows if row["runtime_key"] == "firecracker")
+            self.assertEqual(firecracker_row["kernel_version"], "")
+            self.assertEqual(firecracker_row["kata_version"], "")
+
     def test_suite_summary_includes_kubelet_metric_quantiles(self):
         with tempfile.TemporaryDirectory() as tmp:
             output_dir = Path(tmp)
@@ -41,20 +89,40 @@ class ExtractResultsTests(unittest.TestCase):
                     "fixture",
                     "--runtime-manifest",
                     str(RUNTIME_MANIFEST),
+                    "--environment-metadata",
+                    str(ENVIRONMENT_METADATA),
                 ],
                 check=True,
                 cwd=REPO_ROOT,
             )
 
             actual_json = scrub_summary(json.loads((output_dir / "summary.json").read_text(encoding="utf-8")))
-            expected_json = json.loads(
-                (REPO_ROOT / "tests" / "fixtures" / "expected-suite-summary.json").read_text(encoding="utf-8")
-            )
+            expected_json = read_expected_suite_summary()
             self.assertEqual(actual_json, expected_json)
 
             actual_csv = read_csv(output_dir / "summary.csv")
             expected_csv = read_csv(REPO_ROOT / "tests" / "fixtures" / "expected-suite-summary.csv")
             self.assertEqual(actual_csv, expected_csv)
+
+    def test_suite_summary_without_environment_metadata_keeps_existing_json_shape(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            output_dir = Path(tmp)
+            command = [
+                sys.executable,
+                str(EXTRACT_RESULTS),
+                str(SUITE_FIXTURE),
+                "--output-dir",
+                str(output_dir),
+                "--run-id",
+                "fixture",
+                "--runtime-manifest",
+                str(RUNTIME_MANIFEST),
+            ]
+            subprocess.run(command, check=True, cwd=REPO_ROOT)
+
+            summary = json.loads((output_dir / "summary.json").read_text(encoding="utf-8"))
+            self.assertNotIn("environment", summary)
+            self.assertNotIn("environment", summary["runs"][0])
 
     def test_suite_summary_fails_when_kubelet_metrics_are_missing(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -77,6 +145,8 @@ class ExtractResultsTests(unittest.TestCase):
                     "fixture",
                     "--runtime-manifest",
                     str(RUNTIME_MANIFEST),
+                    "--environment-metadata",
+                    str(ENVIRONMENT_METADATA),
                 ],
                 check=False,
                 cwd=REPO_ROOT,
@@ -143,15 +213,15 @@ class ExtractResultsTests(unittest.TestCase):
                     "fixture",
                     "--runtime-manifest",
                     str(RUNTIME_MANIFEST),
+                    "--environment-metadata",
+                    str(ENVIRONMENT_METADATA),
                 ],
                 check=True,
                 cwd=REPO_ROOT,
             )
 
             actual_json = scrub_summary(json.loads((output_dir / "summary.json").read_text(encoding="utf-8")))
-            expected_json = json.loads(
-                (REPO_ROOT / "tests" / "fixtures" / "expected-suite-summary.json").read_text(encoding="utf-8")
-            )
+            expected_json = read_expected_suite_summary()
             self.assertEqual(actual_json, expected_json)
 
     def test_suite_summary_fails_when_kubelet_metric_record_has_no_runtime_metadata(self):
@@ -190,6 +260,8 @@ class ExtractResultsTests(unittest.TestCase):
                     "fixture",
                     "--runtime-manifest",
                     str(RUNTIME_MANIFEST),
+                    "--environment-metadata",
+                    str(ENVIRONMENT_METADATA),
                 ],
                 check=False,
                 cwd=REPO_ROOT,
@@ -248,6 +320,8 @@ class ExtractResultsTests(unittest.TestCase):
                     "fixture",
                     "--runtime-manifest",
                     str(RUNTIME_MANIFEST),
+                    "--environment-metadata",
+                    str(ENVIRONMENT_METADATA),
                 ],
                 check=True,
                 cwd=REPO_ROOT,
@@ -316,15 +390,15 @@ class ExtractResultsTests(unittest.TestCase):
                     "fixture",
                     "--runtime-manifest",
                     str(RUNTIME_MANIFEST),
+                    "--environment-metadata",
+                    str(ENVIRONMENT_METADATA),
                 ],
                 check=True,
                 cwd=REPO_ROOT,
             )
 
             actual_json = scrub_summary(json.loads((output_dir / "summary.json").read_text(encoding="utf-8")))
-            expected_json = json.loads(
-                (REPO_ROOT / "tests" / "fixtures" / "expected-suite-summary.json").read_text(encoding="utf-8")
-            )
+            expected_json = read_expected_suite_summary()
             self.assertEqual(actual_json, expected_json)
 
     def test_suite_summary_aggregates_label_only_records_by_timestamp_before_delta(self):
@@ -377,15 +451,15 @@ class ExtractResultsTests(unittest.TestCase):
                     "fixture",
                     "--runtime-manifest",
                     str(RUNTIME_MANIFEST),
+                    "--environment-metadata",
+                    str(ENVIRONMENT_METADATA),
                 ],
                 check=True,
                 cwd=REPO_ROOT,
             )
 
             actual_json = scrub_summary(json.loads((output_dir / "summary.json").read_text(encoding="utf-8")))
-            expected_json = json.loads(
-                (REPO_ROOT / "tests" / "fixtures" / "expected-suite-summary.json").read_text(encoding="utf-8")
-            )
+            expected_json = read_expected_suite_summary()
             self.assertEqual(actual_json, expected_json)
 
     def test_suite_summary_fails_when_kubelet_counter_has_only_one_sample(self):
