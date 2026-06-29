@@ -19,14 +19,13 @@ make validate
 make cluster-create RESOURCE_GROUP=rg-aks-rc-bench CLUSTER_NAME=aks-rc-bench LOCATION=eastus
 make bootstrap-cluster
 make kube-burner-install
-kubectl -n runtimeclass-bench-prometheus port-forward svc/prometheus 9090:9090
-make benchmark
+make benchmark-with-port-forward
 make cluster-delete RESOURCE_GROUP=rg-aks-rc-bench CLUSTER_NAME=aks-rc-bench
 ```
 
 Use `make benchmark-dry-run` to prepare the result-local kube-burner suite config and print the kube-burner command without contacting a cluster. By default, `make benchmark` runs the checked-in static suite from `configs/kube-burner-runtimeclass-suite.yml`, which includes the standard runtime baseline plus the Kata, optimized Kata, gVisor, and Firecracker-backed Kata runtime entries in one kube-burner invocation.
 
-`make bootstrap-cluster` installs the repository-managed Prometheus manifests after applying the optimized Kata RuntimeClass and waits for the Prometheus deployment rollout. Prometheus is exposed as an in-cluster ClusterIP service, so the default local kube-burner workflow expects a `kubectl port-forward` from `127.0.0.1:9090` before `make benchmark`.
+`make bootstrap-cluster` installs the repository-managed Prometheus manifests after applying the optimized Kata RuntimeClass and waits for the Prometheus deployment rollout. Prometheus is exposed as an in-cluster ClusterIP service, so the default local kube-burner workflow expects `make prometheus-port-forward` to be running in another terminal before `make benchmark`. For a one-command local run, use `make benchmark-with-port-forward`; it starts the Prometheus port-forward, waits for the endpoint to answer, runs the benchmark, and stops the port-forward when the benchmark exits.
 
 ## Important Make Variables
 
@@ -59,12 +58,16 @@ Node pool variables:
 - `PROMETHEUS_SYSTEM_NODE_SELECTOR_KEY`: Node selector key used to pin Prometheus to the system node pool. Default: `kubernetes.azure.com/agentpool`.
 - `PROMETHEUS_SYSTEM_NODE_SELECTOR_VALUE`: Node selector value used to pin Prometheus to the system node pool. Default: `$(SYSTEM_NODEPOOL_NAME)`.
 - `PROMETHEUS_ROLLOUT_TIMEOUT`: Timeout for `kubectl rollout status` during bootstrap. Default: `5m`.
+- `PROMETHEUS_LOCAL_PORT`: Local port used by `make prometheus-port-forward` and `make benchmark-with-port-forward`. Default: `9090`.
+- `PROMETHEUS_REMOTE_PORT`: Prometheus service port targeted by port-forward helpers. Default: `9090`.
+- `PROMETHEUS_PORT_FORWARD_ADDRESS`: Local bind address for port-forward helpers. Default: `127.0.0.1`.
+- `PROMETHEUS_PORT_FORWARD_TIMEOUT`: Time `make benchmark-with-port-forward` waits for the local Prometheus endpoint before failing. Default: `30s`.
 
 kube-burner and workload variables:
 
 - `KUBE_BURNER_VERSION`: Release tag installed under `tools/`. Default: `v2.7.3`.
 - `KUBE_BURNER_CONFIG`: Repo-relative static kube-burner suite config copied into each result root before execution. Default: `configs/kube-burner-runtimeclass-suite.yml`.
-- `KUBE_BURNER_PROMETHEUS_ENDPOINT`: Prometheus endpoint rendered into the per-run kube-burner config. Default: `http://127.0.0.1:9090`.
+- `KUBE_BURNER_PROMETHEUS_ENDPOINT`: Prometheus endpoint rendered into the per-run kube-burner config. Default: `http://$(PROMETHEUS_PORT_FORWARD_ADDRESS):$(PROMETHEUS_LOCAL_PORT)`.
 - `KUBE_BURNER_PROMETHEUS_METRICS_CONFIG`: Repo-relative kube-burner metrics profile for kubelet startup metrics. Default: `configs/kubelet-startup-metrics.yml`.
 - `RUNTIME_MANIFEST`: Repo-relative static runtime key and label manifest copied into each result root for extraction. Default: `configs/runtime-manifest.json`.
 - `BENCHMARK_TIMEOUT`: Timeout passed to `kube-burner init`. Default: `4h`.
@@ -107,7 +110,7 @@ The extractor fails if any required condition or P50/P95/P99 value is missing.
 3. Run `make bootstrap-cluster` if you need to reapply repository-managed Kubernetes components after cluster credentials are configured. Set `KUBE_CONTEXT=<context>` to target a specific kube context. Confirm `kubectl get runtimeclass kata-optimized -o jsonpath='{.handler}{" "}{.overhead.podFixed.memory}'` prints `kata 32Mi`, and confirm `kubectl get runtimeclass gvisor kata-fc` shows both repository-managed runtime classes. For exact handlers, `kubectl get runtimeclass gvisor -o jsonpath='{.handler}'` should print `runsc` and `kubectl get runtimeclass kata-fc -o jsonpath='{.handler}'` should print `kata-fc`.
 4. Run `make kube-burner-install` and confirm `tools/bin/kube-burner version` works.
 5. Confirm Prometheus is available with `kubectl -n runtimeclass-bench-prometheus rollout status deployment/prometheus --timeout 5m`.
-6. If kube-burner runs from your local shell, start `kubectl -n runtimeclass-bench-prometheus port-forward svc/prometheus 9090:9090` and leave it running. If you use a different local port or endpoint, pass `KUBE_BURNER_PROMETHEUS_ENDPOINT=<endpoint>` to `make benchmark`.
+6. If kube-burner runs from your local shell, start `make prometheus-port-forward` and leave it running. If you use a different local port, set `PROMETHEUS_LOCAL_PORT=<port>`; the default kube-burner Prometheus endpoint follows that port. Alternatively, run `make benchmark-with-port-forward` to start and stop the local Prometheus port-forward around the benchmark automatically.
 7. Before a long benchmark, verify Prometheus can query the kubelet metrics:
 
 ```bash
