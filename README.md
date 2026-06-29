@@ -93,15 +93,17 @@ To change runtime topology, edit both checked-in benchmark inputs together:
 - Add or remove matching runtime entries in `configs/runtime-manifest.json` so the extractor expects the same runtime keys.
 - Keep the `__METRICS_DIR__`, `__PROMETHEUS_ENDPOINT__`, and `__PROMETHEUS_METRICS_CONFIG__` placeholders in the static suite config; `make benchmark` replaces them with the run's raw metrics directory, configured Prometheus endpoint, and metrics profile path.
 
-- `summary.json`: Aggregate run metadata and required pod latency quantiles for every runtime entry.
-- `summary.csv`: Aggregate rows for `run_id`, `runtime_key`, `runtime_class`, `condition`, `p50`, `p95`, and `p99` when `CSV_OUTPUT=true`.
+- `summary.json`: Aggregate run metadata for every runtime entry. Each run includes `quantiles` for required pod latency conditions and `kubeletMetricQuantiles` for configured kubelet startup metric families.
+- `summary.csv`: Aggregate rows for `run_id`, `runtime_key`, `runtime_class`, `metric_category`, `condition`, `metric_name`, `metric_family`, `unit`, `p50`, `p95`, and `p99` when `CSV_OUTPUT=true`. Pod latency rows use `metric_category=pod_latency` and set `condition`; kubelet startup metric rows use `metric_category=kubelet_metric` and set `metric_name`, `metric_family`, and `unit`.
 - `kube-burner.yml`: Static kube-burner suite config prepared for the invocation.
 - `runtime-manifest.json`: Copied runtime keys and summary labels used by the extractor.
 - `raw/`: kube-burner local metrics output.
 
-The Prometheus metrics profile queries these kubelet metric families from the configured Prometheus endpoint: `kubelet_run_podsandbox_duration_seconds`, `kubelet_pod_start_sli_duration_seconds`, and `kubelet_pod_start_total_duration_seconds`, including `_bucket`, `_sum`, and `_count` series where present.
+The Prometheus metrics profile queries these kubelet metric families from the configured Prometheus endpoint: `kubelet_run_podsandbox_duration_seconds`, `kubelet_pod_start_sli_duration_seconds`, and `kubelet_pod_start_total_duration_seconds`, including `_bucket`, `_sum`, and `_count` series where present. The extractor derives P50, P95, and P99 duration values from the collected histogram buckets for each runtime entry and writes them under `kubeletMetricQuantiles` in JSON and as `kubelet_metric` rows in CSV.
 
-The extractor fails if any required condition or P50/P95/P99 value is missing.
+Each runtime job uses `metricsClosing: afterJobPause` and `jobPause: 20s` so Prometheus has time to scrape at least once after fast jobs complete. Keep this pause longer than the Prometheus scrape interval; otherwise fast runtime jobs can produce zero bucket deltas and the extractor will fail rather than report misleading kubelet metric quantiles.
+
+The extractor fails if any required pod latency condition, kubelet startup metric family, or P50/P95/P99 value is missing or cannot be attributed to exactly one runtime.
 
 ## Manual End-to-End Verification
 
@@ -120,6 +122,6 @@ curl -G 'http://127.0.0.1:9090/api/v1/query' --data-urlencode 'query=kubelet_pod
 ```
 
 8. Run `make benchmark`.
-9. Confirm `results/<RUN_ID>/summary.json`, `results/<RUN_ID>/summary.csv`, and `results/<RUN_ID>/kube-burner.yml` exist, and that the summaries contain all five required pod latency conditions and P50/P95/P99 values for `standard`, `kata`, `kata-optimized`, `gvisor`, and `firecracker`.
+9. Confirm `results/<RUN_ID>/summary.json`, `results/<RUN_ID>/summary.csv`, and `results/<RUN_ID>/kube-burner.yml` exist, and that the summaries contain all five required pod latency conditions plus P50/P95/P99 kubelet startup metric values for `standard`, `kata`, `kata-optimized`, `gvisor`, and `firecracker`.
 10. Confirm the rendered `results/<RUN_ID>/kube-burner.yml` contains the configured Prometheus endpoint and references `configs/kubelet-startup-metrics.yml`; confirm that metrics profile contains the three kubelet startup metric queries.
 11. Run `make cluster-delete` with the same resource variables. Use `TEARDOWN_SCOPE=resource-group` only when the resource group is dedicated to the benchmark.

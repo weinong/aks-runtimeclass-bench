@@ -22,6 +22,11 @@ def read_csv(path):
 
 
 def assert_aggregate_summary(run_dir, expected_runtimes):
+    required_kubelet_metric_families = {
+        "kubelet_run_podsandbox_duration_seconds",
+        "kubelet_pod_start_sli_duration_seconds",
+        "kubelet_pod_start_total_duration_seconds",
+    }
     summary = read_json(run_dir / "summary.json")
     runs = summary.get("runs")
     require(isinstance(runs, list), f"{run_dir}/summary.json must contain a runs array")
@@ -35,6 +40,22 @@ def assert_aggregate_summary(run_dir, expected_runtimes):
         ready = next((item for item in quantiles if item.get("condition") == "Ready"), None)
         require(ready is not None, f"aggregate run {run.get('runtimeKey')!r} must include Ready quantiles")
         p50_by_runtime[run.get("runtimeKey")] = ready.get("P50")
+        kubelet_quantiles = run.get("kubeletMetricQuantiles")
+        require(
+            isinstance(kubelet_quantiles, list) and kubelet_quantiles,
+            f"aggregate run {run.get('runtimeKey')!r} must include kubelet metric quantiles",
+        )
+        actual_families = {item.get("metricFamily") for item in kubelet_quantiles}
+        require(
+            actual_families == required_kubelet_metric_families,
+            f"aggregate run {run.get('runtimeKey')!r} kubelet metric families are {actual_families!r}, expected {required_kubelet_metric_families!r}",
+        )
+        for item in kubelet_quantiles:
+            for quantile in ["P50", "P95", "P99"]:
+                require(
+                    isinstance(item.get(quantile), (int, float)),
+                    f"aggregate run {run.get('runtimeKey')!r} kubelet metric {item.get('metricFamily')!r} must include numeric {quantile}",
+                )
     require(
         p50_by_runtime.get("standard") != p50_by_runtime.get("kata"),
         "standard and Kata fixture quantiles must stay separated",
@@ -55,6 +76,19 @@ def assert_aggregate_summary(run_dir, expected_runtimes):
     rows = read_csv(run_dir / "summary.csv")
     row_keys = {row.get("runtime_key") for row in rows}
     require(row_keys == set(expected_runtimes), f"aggregate CSV runtime keys are {row_keys!r}, expected {set(expected_runtimes)!r}")
+    for key in expected_runtimes:
+        runtime_rows = [row for row in rows if row.get("runtime_key") == key]
+        pod_rows = [row for row in runtime_rows if row.get("metric_category") == "pod_latency"]
+        kubelet_rows = [row for row in runtime_rows if row.get("metric_category") == "kubelet_metric"]
+        require(len(pod_rows) == 5, f"aggregate CSV runtime {key!r} must include 5 pod latency rows")
+        actual_families = {row.get("metric_family") for row in kubelet_rows}
+        require(
+            actual_families == required_kubelet_metric_families,
+            f"aggregate CSV runtime {key!r} kubelet metric families are {actual_families!r}, expected {required_kubelet_metric_families!r}",
+        )
+        for row in kubelet_rows:
+            for quantile in ["p50", "p95", "p99"]:
+                require(row.get(quantile), f"aggregate CSV runtime {key!r} kubelet metric row must include {quantile}")
 
 
 def assert_runtime_manifest(path, expected_runtimes):
@@ -155,6 +189,14 @@ def main():
     require("name: runtimeclass-pod-latency-kata-optimized" in config_text, "config must include optimized Kata job")
     require("name: runtimeclass-pod-latency-gvisor" in config_text, "config must include gVisor job")
     require("name: runtimeclass-pod-latency-firecracker" in config_text, "config must include Firecracker job")
+    require(
+        config_text.count("metricsClosing: afterJobPause") >= 5,
+        "runtime jobs must close Prometheus metrics after jobPause",
+    )
+    require(
+        config_text.count("jobPause: 20s") >= 5,
+        "runtime jobs must pause long enough for at least one Prometheus scrape before closing metrics",
+    )
     require('runtimeClass: ""' in config_text, "standard job must leave runtimeClass empty")
     require('runtimeClass: "kata-vm-isolation"' in config_text, "Kata job must include runtimeClass")
     require('runtimeClass: "kata-optimized"' in config_text, "optimized Kata job must include runtimeClass")

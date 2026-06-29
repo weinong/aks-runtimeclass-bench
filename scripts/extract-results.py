@@ -15,6 +15,25 @@ REQUIRED_CONDITIONS = [
     "Ready",
 ]
 REQUIRED_QUANTILES = ["P50", "P95", "P99"]
+KUBELET_STARTUP_METRICS = [
+    {
+        "metricName": "kubeletRunPodSandboxDurationSeconds",
+        "metricFamily": "kubelet_run_podsandbox_duration_seconds",
+        "unit": "seconds",
+    },
+    {
+        "metricName": "kubeletPodStartSliDurationSeconds",
+        "metricFamily": "kubelet_pod_start_sli_duration_seconds",
+        "unit": "seconds",
+    },
+    {
+        "metricName": "kubeletPodStartTotalDurationSeconds",
+        "metricFamily": "kubelet_pod_start_total_duration_seconds",
+        "unit": "seconds",
+    },
+]
+KUBELET_METRIC_FAMILIES = {metric["metricFamily"] for metric in KUBELET_STARTUP_METRICS}
+KUBELET_METRIC_NAME_TO_FAMILY = {metric["metricName"]: metric["metricFamily"] for metric in KUBELET_STARTUP_METRICS}
 
 
 def iter_json_values(path):
@@ -42,15 +61,18 @@ def iter_json_values(path):
 
 
 def collect_records(input_dir):
-    records = []
+    pod_records = []
+    kubelet_records = []
     for path in sorted(input_dir.rglob("*.json")):
         for value in iter_json_values(path):
             if isinstance(value, dict) and value.get("metricName") == "podLatencyQuantilesMeasurement":
-                records.append(value)
-    return records
+                pod_records.append(value)
+            elif isinstance(value, dict) and kubelet_metric_family(value) in KUBELET_METRIC_FAMILIES:
+                kubelet_records.append(value)
+    return pod_records, kubelet_records
 
 
-def record_runtime_key(record, expected_keys=None):
+def record_runtime_key(record, expected_keys=None, record_type="pod latency"):
     expected_keys = set(expected_keys or [])
     candidates = set()
     for name in ["jobName", "job", "job_name", "kubeBurnerJob"]:
@@ -59,7 +81,7 @@ def record_runtime_key(record, expected_keys=None):
             if value.startswith("runtimeclass-pod-latency-"):
                 key = value.removeprefix("runtimeclass-pod-latency-")
                 if expected_keys and key not in expected_keys:
-                    raise SystemExit(f"pod latency record references unknown runtime job: {value}")
+                    raise SystemExit(f"{record_type} record references unknown runtime job: {value}")
                 candidates.add(key)
             elif value in expected_keys:
                 candidates.add(value)
@@ -68,11 +90,192 @@ def record_runtime_key(record, expected_keys=None):
         value = labels.get("runtimeclass-bench-key")
         if isinstance(value, str) and value:
             if expected_keys and value not in expected_keys:
-                raise SystemExit(f"pod latency record references unknown runtime label: {value}")
+                raise SystemExit(f"{record_type} record references unknown runtime label: {value}")
             candidates.add(value)
     if len(candidates) > 1:
-        raise SystemExit(f"pod latency record contains conflicting runtime identifiers: {sorted(candidates)}")
+        raise SystemExit(f"{record_type} record contains conflicting runtime identifiers: {sorted(candidates)}")
     return next(iter(candidates), None)
+
+
+def kubelet_metric_labels(record):
+    labels = {}
+    for name in ["labels", "metric"]:
+        value = record.get(name)
+        if isinstance(value, dict):
+            labels.update(value)
+    for name in ["__name__", "le"]:
+        value = record.get(name)
+        if isinstance(value, str):
+            labels[name] = value
+    return labels
+
+
+def kubelet_metric_family(record):
+    name = kubelet_metric_labels(record).get("__name__")
+    if isinstance(name, str):
+        for suffix in ["_bucket", "_sum", "_count"]:
+            if name.endswith(suffix):
+                return name[: -len(suffix)]
+        return name
+    return KUBELET_METRIC_NAME_TO_FAMILY.get(record.get("metricName"))
+
+
+def kubelet_metric_is_bucket(record, family):
+    name = kubelet_metric_labels(record).get("__name__")
+    if isinstance(name, str):
+        return name == f"{family}_bucket"
+    return kubelet_metric_labels(record).get("le") is not None
+
+
+def kubelet_metric_value(record):
+    for name in ["value", "metricValue", "Value"]:
+        value = record.get(name)
+        if isinstance(value, list) and len(value) >= 2:
+            value = value[1]
+        if value is not None:
+            try:
+                return float(value)
+            except (TypeError, ValueError):
+                raise SystemExit(f"kubelet metric record has non-numeric value: {value!r}")
+    raise SystemExit("kubelet metric record is missing a numeric value")
+
+
+def parse_bucket_bound(value):
+    if value in ["+Inf", "Inf", "inf"]:
+        return float("inf")
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        raise SystemExit(f"kubelet metric record has invalid histogram bucket bound: {value!r}")
+
+
+def clean_float(value):
+    return round(value, 12)
+
+
+def parse_timestamp(value):
+    if not isinstance(value, str) or not value:
+        return ""
+    return value
+
+
+def kubelet_series_key(record):
+    labels = dict(kubelet_metric_labels(record))
+    labels.pop("__name__", None)
+    labels.pop("le", None)
+    return tuple(sorted(labels.items()))
+
+
+def reduce_histogram_buckets(records):
+    series = {}
+    aggregate_by_timestamp = {}
+    for record in records:
+        labels = kubelet_metric_labels(record)
+        upper = parse_bucket_bound(labels.get("le"))
+        key = (upper, kubelet_series_key(record))
+        timestamp = parse_timestamp(record.get("timestamp"))
+        value = kubelet_metric_value(record)
+        if key[1] == ():
+            aggregate_key = (upper, timestamp)
+            aggregate_by_timestamp[aggregate_key] = aggregate_by_timestamp.get(aggregate_key, 0.0) + value
+            continue
+        current = series.setdefault(key, [])
+        current.append((timestamp, value))
+
+    for (upper, timestamp), value in aggregate_by_timestamp.items():
+        current = series.setdefault((upper, ()), [])
+        current.append((timestamp, value))
+
+    buckets = []
+    for (upper, _series_key), samples in series.items():
+        samples.sort(key=lambda item: item[0])
+        if len(samples) < 2:
+            if samples[0][0] == "":
+                buckets.append((upper, samples[0][1]))
+                continue
+            raise SystemExit("kubelet metric histogram counters requires at least two Prometheus samples")
+        value = samples[-1][1] - samples[0][1]
+        if value < 0:
+            value = samples[-1][1]
+        buckets.append((upper, value))
+    return buckets
+
+
+def histogram_quantile(metric_family, quantile_name, quantile, buckets):
+    aggregated = {}
+    for upper, count in buckets:
+        aggregated[upper] = aggregated.get(upper, 0.0) + count
+
+    finite_buckets = sorted((upper, count) for upper, count in aggregated.items() if upper != float("inf"))
+    infinite_buckets = [count for upper, count in aggregated.items() if upper == float("inf")]
+    if not finite_buckets or not infinite_buckets:
+        raise SystemExit(f"kubelet metric {metric_family} is missing finite or +Inf histogram buckets")
+
+    total = max(infinite_buckets)
+    if total <= 0:
+        raise SystemExit(f"kubelet metric {metric_family} has no histogram samples")
+
+    rank = total * quantile
+    previous_upper = 0.0
+    previous_count = 0.0
+    for upper, count in finite_buckets:
+        if count < previous_count:
+            raise SystemExit(f"kubelet metric {metric_family} histogram buckets are not cumulative")
+        if count >= rank:
+            bucket_count = count - previous_count
+            if bucket_count <= 0:
+                return clean_float(upper)
+            fraction = (rank - previous_count) / bucket_count
+            return clean_float(previous_upper + (upper - previous_upper) * fraction)
+        previous_upper = upper
+        previous_count = count
+
+    return clean_float(finite_buckets[-1][0])
+
+
+def build_kubelet_metric_quantiles(records, runtime_key=None, expected_keys=None, required=False):
+    records_by_family = {metric["metricFamily"]: [] for metric in KUBELET_STARTUP_METRICS}
+    for record in records:
+        if runtime_key is not None and record_runtime_key(record, expected_keys, "kubelet metric") != runtime_key:
+            continue
+        family = kubelet_metric_family(record)
+        if family not in records_by_family or not kubelet_metric_is_bucket(record, family):
+            continue
+        records_by_family[family].append(record)
+
+    missing = []
+    quantiles = []
+    for metric in KUBELET_STARTUP_METRICS:
+        family = metric["metricFamily"]
+        family_records = records_by_family[family]
+        if not family_records:
+            missing.append(f"{runtime_key}: {family}" if runtime_key else family)
+            continue
+        buckets = reduce_histogram_buckets(family_records)
+        quantiles.append(
+            {
+                "metricName": metric["metricName"],
+                "metricFamily": family,
+                "unit": metric["unit"],
+                "P50": histogram_quantile(family, "P50", 0.50, buckets),
+                "P95": histogram_quantile(family, "P95", 0.95, buckets),
+                "P99": histogram_quantile(family, "P99", 0.99, buckets),
+            }
+        )
+
+    if missing and required:
+        raise SystemExit("missing required kubelet metric quantiles: " + "; ".join(missing))
+
+    return quantiles
+
+
+def validate_kubelet_metric_runtime_attribution(records, expected_keys):
+    for record in records:
+        family = kubelet_metric_family(record)
+        if family not in KUBELET_METRIC_FAMILIES or not kubelet_metric_is_bucket(record, family):
+            continue
+        if record_runtime_key(record, expected_keys, "kubelet metric") is None:
+            raise SystemExit(f"kubelet metric record is missing runtime metadata for {family}")
 
 
 def build_runtime_quantiles(records, runtime_key, expected_keys=None):
@@ -136,9 +339,10 @@ def load_runtime_manifest(path):
     return runtimes
 
 
-def build_suite_summary(records, input_dir, run_id, runtime_manifest):
+def build_suite_summary(records, kubelet_records, input_dir, run_id, runtime_manifest):
     expected_keys = {runtime["key"] for runtime in runtime_manifest}
     keyed_records = [record for record in records if record_runtime_key(record, expected_keys) is not None]
+    validate_kubelet_metric_runtime_attribution(kubelet_records, expected_keys)
     use_keyed_records = bool(keyed_records)
     if use_keyed_records and len(keyed_records) != len(records):
         raise SystemExit("mixed keyed and unkeyed pod latency records found; cannot safely separate runtime results")
@@ -149,6 +353,7 @@ def build_suite_summary(records, input_dir, run_id, runtime_manifest):
         key = runtime["key"]
         runtime_records = records if not use_keyed_records else keyed_records
         quantiles = build_runtime_quantiles(runtime_records, key if use_keyed_records else None, expected_keys)
+        kubelet_metric_quantiles = build_kubelet_metric_quantiles(kubelet_records, key, expected_keys, required=True)
         runs.append(
             {
                 "runtimeKey": key,
@@ -156,6 +361,7 @@ def build_suite_summary(records, input_dir, run_id, runtime_manifest):
                 "runId": f"{run_id}-{key}",
                 "sourceDirectory": str(input_dir),
                 "quantiles": quantiles,
+                "kubeletMetricQuantiles": kubelet_metric_quantiles,
             }
         )
 
@@ -188,7 +394,19 @@ def write_suite_csv(summary, path):
     with path.open("w", newline="", encoding="utf-8") as handle:
         writer = csv.DictWriter(
             handle,
-            fieldnames=["run_id", "runtime_key", "runtime_class", "condition", "p50", "p95", "p99"],
+            fieldnames=[
+                "run_id",
+                "runtime_key",
+                "runtime_class",
+                "metric_category",
+                "condition",
+                "metric_name",
+                "metric_family",
+                "unit",
+                "p50",
+                "p95",
+                "p99",
+            ],
         )
         writer.writeheader()
         for run in summary["runs"]:
@@ -198,7 +416,27 @@ def write_suite_csv(summary, path):
                         "run_id": run["runId"],
                         "runtime_key": run["runtimeKey"],
                         "runtime_class": run["runtimeClass"],
+                        "metric_category": "pod_latency",
                         "condition": item["condition"],
+                        "metric_name": "",
+                        "metric_family": "",
+                        "unit": "",
+                        "p50": item["P50"],
+                        "p95": item["P95"],
+                        "p99": item["P99"],
+                    }
+                )
+            for item in run["kubeletMetricQuantiles"]:
+                writer.writerow(
+                    {
+                        "run_id": run["runId"],
+                        "runtime_key": run["runtimeKey"],
+                        "runtime_class": run["runtimeClass"],
+                        "metric_category": "kubelet_metric",
+                        "condition": "",
+                        "metric_name": item["metricName"],
+                        "metric_family": item["metricFamily"],
+                        "unit": item["unit"],
                         "p50": item["P50"],
                         "p95": item["P95"],
                         "p99": item["P99"],
@@ -219,12 +457,12 @@ def main():
     if not args.input_dir.is_dir():
         raise SystemExit(f"input directory does not exist: {args.input_dir}")
 
-    records = collect_records(args.input_dir)
+    records, kubelet_records = collect_records(args.input_dir)
     if not records:
         raise SystemExit(f"no podLatencyQuantilesMeasurement records found under {args.input_dir}")
 
     if args.runtime_manifest:
-        summary = build_suite_summary(records, args.input_dir, args.run_id, load_runtime_manifest(args.runtime_manifest))
+        summary = build_suite_summary(records, kubelet_records, args.input_dir, args.run_id, load_runtime_manifest(args.runtime_manifest))
     else:
         summary = build_single_summary(records, args.input_dir, args.run_id, args.runtime_class)
     args.output_dir.mkdir(parents=True, exist_ok=True)
