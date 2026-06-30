@@ -105,15 +105,19 @@ The kube-burner workload SHALL create pods from a checked-in static suite config
 - **THEN** kube-burner creates a standard runtime benchmark entry without a `runtimeClassName` field and with the standard runtime placement settings defined by that checked-in suite config
 
 ### Requirement: Benchmark execution target
-The benchmark suite SHALL provide a Make target that runs kube-burner against the AKS cluster under test using a repository-managed static suite config for every runtime entry in one benchmark invocation, and SHALL configure kube-burner to query the repository-managed Prometheus endpoint for Prometheus-calculated kubelet startup quantiles.
+The benchmark suite SHALL provide a primary `benchmark` Make target that starts local access to the repository-managed Prometheus endpoint when needed, runs kube-burner against the AKS cluster under test using a repository-managed static suite config for every runtime entry in one benchmark invocation, configures kube-burner to query the repository-managed Prometheus endpoint for Prometheus-calculated kubelet startup quantiles, and stops the local Prometheus access path after the run completes.
 
 #### Scenario: Run kube-burner benchmark suite
 - **WHEN** an operator runs the benchmark Make target after cluster credentials are configured
-- **THEN** the suite copies or prepares the checked-in kube-burner config for the invocation and invokes kube-burner once with that config
+- **THEN** the suite starts the Prometheus port-forward workflow, runs the checked-in kube-burner config through one benchmark invocation, and stops the port-forward workflow when the invocation exits
 
 #### Scenario: Configure kubelet startup metric collection
 - **WHEN** the benchmark target prepares the kube-burner config for an invocation
 - **THEN** the rendered config includes Prometheus `histogram_quantile()` collection for P50, P95, and P99 values of the `kubelet_run_podsandbox_duration_seconds`, `kubelet_pod_start_sli_duration_seconds`, and `kubelet_pod_start_total_duration_seconds` metric families from the configured Prometheus endpoint
+
+#### Scenario: Preserve direct benchmark invocation for wrapper use
+- **WHEN** repository automation needs to run the lower-level benchmark without managing a Prometheus port-forward
+- **THEN** the suite provides a Make-accessible direct benchmark target that invokes the underlying benchmark script without starting or stopping the port-forward workflow
 
 ### Requirement: Default runtime baseline benchmark execution
 The benchmark suite SHALL include the default Kubernetes runtime as a static benchmark entry and SHALL run the checked-in runtime class entries in the same benchmark invocation, with each runtime entry scheduled onto node-pool placement that preserves an unambiguous Prometheus label for that runtime entry.
@@ -224,7 +228,7 @@ The benchmark suite SHALL capture environment metadata for each benchmark invoca
 - **THEN** the suite records the field as unavailable without discarding successfully extracted benchmark latency results
 
 ### Requirement: Benchmark summaries include environment metadata
-The benchmark suite SHALL include captured environment metadata in aggregate JSON and CSV benchmark summaries so benchmark results can be compared with their cluster and runtime context.
+The benchmark suite SHALL include captured environment metadata in aggregate JSON benchmark summaries so benchmark results can be compared with their cluster and runtime context while keeping aggregate CSV summaries focused on metric rows.
 
 #### Scenario: Include environment metadata in JSON summary
 - **WHEN** aggregate JSON summary extraction runs with an environment metadata file
@@ -234,9 +238,9 @@ The benchmark suite SHALL include captured environment metadata in aggregate JSO
 - **WHEN** aggregate JSON summary extraction writes a runtime entry
 - **THEN** the runtime entry includes the node pool metadata associated with that runtime entry, including VM SKU, kernel version, containerd version, kubelet version, and Kata runtime version when available
 
-#### Scenario: Include environment metadata in CSV rows
+#### Scenario: Omit environment metadata from CSV rows
 - **WHEN** aggregate CSV summary extraction runs with an environment metadata file
-- **THEN** every CSV metric row includes stable environment metadata columns for the runtime entry, including node pool, VM SKU, kernel version, containerd version, kubelet version, and Kata runtime version
+- **THEN** CSV metric rows omit repeated environment metadata columns including node pool, VM SKU, kernel version, containerd version, kubelet version, and Kata runtime version
 
 #### Scenario: Extract summaries from fixture metadata
 - **WHEN** summary extraction is run for local tests with a fixture environment metadata file
