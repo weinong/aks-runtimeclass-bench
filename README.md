@@ -120,8 +120,8 @@ The dedicated runtime node pools increase cluster cost and provisioning time bec
 3. Run `make bootstrap-cluster` if you need to reapply repository-managed Kubernetes components after cluster credentials are configured. Set `KUBE_CONTEXT=<context>` to target a specific kube context. Confirm `kubectl get runtimeclass kata-optimized -o jsonpath='{.handler}{" "}{.overhead.podFixed.memory}'` prints `kata 32Mi`, and confirm `kubectl get runtimeclass gvisor kata-fc` shows both repository-managed runtime classes. For exact handlers, `kubectl get runtimeclass gvisor -o jsonpath='{.handler}'` should print `runsc` and `kubectl get runtimeclass kata-fc -o jsonpath='{.handler}'` should print `kata-fc`.
 4. Run `make kube-burner-install` and confirm `tools/bin/kube-burner version` works.
 5. Confirm Prometheus is available with `kubectl -n runtimeclass-bench-prometheus rollout status deployment/prometheus --timeout 5m`.
-6. If you need to manage the port-forward separately, start `make prometheus-port-forward` and leave it running, then use `make benchmark-direct`. If you use a different local port, set `PROMETHEUS_LOCAL_PORT=<port>`; the default kube-burner Prometheus endpoint follows that port. Otherwise, run `make benchmark` to start and stop the local Prometheus port-forward around the benchmark automatically.
-7. Before a long benchmark, verify Prometheus can query the kubelet metrics:
+6. Choose the port-forward mode. For the managed workflow, skip the manual `curl` preflight and run `make benchmark` in step 8 so the port-forward starts and stops around the benchmark automatically. For manual preflight, start `make prometheus-port-forward` in another terminal and leave it running; if you use a different local port, set `PROMETHEUS_LOCAL_PORT=<port>` so the default kube-burner Prometheus endpoint follows that port.
+7. If you started a separate port-forward in step 6, before a long benchmark verify Prometheus can query the kubelet metrics:
 
 ```bash
 curl -G 'http://127.0.0.1:9090/api/v1/query' --data-urlencode 'query=kubelet_run_podsandbox_duration_seconds_count'
@@ -131,7 +131,7 @@ curl -G 'http://127.0.0.1:9090/api/v1/query' --data-urlencode 'query=count by (r
 curl -G 'http://127.0.0.1:9090/api/v1/query' --data-urlencode 'query=histogram_quantile(0.95, sum by (le, runtimeclass) (increase(kubelet_run_podsandbox_duration_seconds_bucket[5m])))'
 ```
 
-8. Run `make benchmark`.
+8. Run `make benchmark` for the managed workflow, or `make benchmark-direct` while the separately managed port-forward is still running.
 9. Confirm `results/<RUN_ID>/environment-metadata.json`, `results/<RUN_ID>/summary.json`, `results/<RUN_ID>/summary.csv`, and `results/<RUN_ID>/kube-burner.yml` exist, and that the summaries contain all five required pod latency conditions plus P50/P95/P99 kubelet startup metric values for `standard`, `kata`, `kata-optimized`, `gvisor`, and `firecracker`.
 10. Confirm the rendered `results/<RUN_ID>/kube-burner.yml` contains the configured Prometheus endpoint and references `configs/kubelet-startup-metrics.yml`; confirm that metrics profile contains the three kubelet startup metric queries.
 11. Run `make cluster-delete` with the same resource variables. Use `TEARDOWN_SCOPE=resource-group` only when the resource group is dedicated to the benchmark.
