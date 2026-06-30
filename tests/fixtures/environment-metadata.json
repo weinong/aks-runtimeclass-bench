@@ -10,9 +10,9 @@
     "kataVersion": "runtime-specific inspection"
   },
   "runtimeNodePools": {
-    "standard": "sys",
+    "standard": "standard",
     "kata": "kata",
-    "kata-optimized": "kata",
+    "kata-optimized": "kataopt",
     "gvisor": "gvisor",
     "firecracker": "firecracker"
   },
@@ -34,6 +34,24 @@
       "containerdVersion": "containerd://1.7.27",
       "kataVersion": "3.17.0",
       "nodes": ["aks-kata-00000000-vmss000000"]
+    },
+    {
+      "name": "standard",
+      "vmSku": "Standard_D8s_v5",
+      "kernelVersion": "5.15.0-1092-azure",
+      "kubeletVersion": "v1.31.8",
+      "containerdVersion": "containerd://1.7.27",
+      "kataVersion": null,
+      "nodes": ["aks-standard-00000000-vmss000000"]
+    },
+    {
+      "name": "kataopt",
+      "vmSku": "Standard_D8s_v5",
+      "kernelVersion": "5.15.0-1092-azure",
+      "kubeletVersion": "v1.31.8",
+      "containerdVersion": "containerd://1.7.27",
+      "kataVersion": "3.17.0",
+      "nodes": ["aks-kataopt-00000000-vmss000000"]
     },
     {
       "name": "gvisor",

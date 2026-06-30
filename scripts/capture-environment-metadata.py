@@ -145,7 +145,7 @@ def default_runtime_node_pool_names(runtime_manifest):
     for runtime in runtime_entries(runtime_manifest):
         key = runtime.get("key") if isinstance(runtime, dict) else None
         if isinstance(key, str) and key:
-            names[key] = "sys" if key == "standard" else ("kata" if key == "kata-optimized" else key)
+            names[key] = "kataopt" if key == "kata-optimized" else key
     return names
 
 

@@ -11,10 +11,12 @@ raw_dir="$run_dir/raw"
 rendered_config="$run_dir/kube-burner.yml"
 runtime_manifest="$run_dir/runtime-manifest.json"
 environment_metadata="$run_dir/environment-metadata.json"
+runtime_config_dir="$run_dir/kube-burner"
+runtime_keys_file="$run_dir/runtime-keys.txt"
 metadata_runtime_node_pools=(
-  "standard=${SYSTEM_NODEPOOL_NAME:-sys}"
+  "standard=${STANDARD_NODEPOOL_NAME:-standard}"
   "kata=${KATA_NODEPOOL_NAME:-kata}"
-  "kata-optimized=${KATA_NODEPOOL_NAME:-kata}"
+  "kata-optimized=${KATA_OPTIMIZED_NODEPOOL_NAME:-kataopt}"
   "gvisor=${GVISOR_NODEPOOL_NAME:-gvisor}"
   "firecracker=${FIRECRACKER_NODEPOOL_NAME:-firecracker}"
 )
@@ -70,25 +72,35 @@ config_text=${config_text//$prometheus_endpoint_placeholder/$prometheus_endpoint
 config_text=${config_text//$prometheus_metrics_config_placeholder/$prometheus_metrics_config}
 printf '%s' "$config_text" > "$rendered_config"
 cp "$suite_manifest" "$runtime_manifest"
+prepare_configs_cmd=("$SCRIPT_DIR/prepare-runtime-configs.py"
+  --suite-config "$suite_config"
+  --runtime-manifest "$runtime_manifest"
+  --metrics-template "$prometheus_metrics_config"
+  --output-dir "$run_dir"
+  --raw-dir "$raw_dir"
+  --prometheus-endpoint "$prometheus_endpoint")
+print_cmd "${prepare_configs_cmd[@]}"
+"${prepare_configs_cmd[@]}"
 log "Prepared kube-burner config from $suite_config at $rendered_config"
 
 kube_burner=$(resolve_kube_burner)
-cmd=("$kube_burner" init
-  --config "$rendered_config"
-  --uuid "$requested_run_id"
-  --allow-missing
-  --timeout "${BENCHMARK_TIMEOUT:-4h}")
-
-if [[ -n "${KUBECONFIG:-}" ]]; then
-  cmd+=(--kubeconfig "$KUBECONFIG")
-fi
-if [[ -n "${KUBE_CONTEXT:-}" ]]; then
-  cmd+=(--kube-context "$KUBE_CONTEXT")
-fi
 
 if is_true "${DRY_RUN:-0}"; then
   log "DRY_RUN=1: not invoking kube-burner for $requested_run_id"
-  print_cmd "${cmd[@]}"
+  while IFS= read -r runtime_key; do
+    cmd=("$kube_burner" init
+      --config "$runtime_config_dir/$runtime_key.yml"
+      --uuid "$requested_run_id-$runtime_key"
+      --allow-missing
+      --timeout "${BENCHMARK_TIMEOUT:-4h}")
+    if [[ -n "${KUBECONFIG:-}" ]]; then
+      cmd+=(--kubeconfig "$KUBECONFIG")
+    fi
+    if [[ -n "${KUBE_CONTEXT:-}" ]]; then
+      cmd+=(--kube-context "$KUBE_CONTEXT")
+    fi
+    print_cmd "${cmd[@]}"
+  done < "$runtime_keys_file"
   log "DRY_RUN=1: not capturing environment metadata for $requested_run_id"
   dry_run_capture_cmd=("$SCRIPT_DIR/capture-environment-metadata.py" --output "$environment_metadata" --runtime-manifest "$runtime_manifest" --prometheus-endpoint "$prometheus_endpoint")
   for mapping in "${metadata_runtime_node_pools[@]}"; do
@@ -123,7 +135,20 @@ if [[ -n "${FIRECRACKER_KATA_VERSION:-}" ]]; then
   capture_cmd+=(--kata-version "${FIRECRACKER_NODEPOOL_NAME:-firecracker}=$FIRECRACKER_KATA_VERSION")
 fi
 run_cmd "${capture_cmd[@]}"
-run_cmd "${cmd[@]}"
+while IFS= read -r runtime_key; do
+  cmd=("$kube_burner" init
+    --config "$runtime_config_dir/$runtime_key.yml"
+    --uuid "$requested_run_id-$runtime_key"
+    --allow-missing
+    --timeout "${BENCHMARK_TIMEOUT:-4h}")
+  if [[ -n "${KUBECONFIG:-}" ]]; then
+    cmd+=(--kubeconfig "$KUBECONFIG")
+  fi
+  if [[ -n "${KUBE_CONTEXT:-}" ]]; then
+    cmd+=(--kube-context "$KUBE_CONTEXT")
+  fi
+  run_cmd "${cmd[@]}"
+done < "$runtime_keys_file"
 
 extract_cmd=("$SCRIPT_DIR/extract-results.py" "$raw_dir" --output-dir "$run_dir" --run-id "$requested_run_id" --runtime-manifest "$runtime_manifest" --environment-metadata "$environment_metadata")
 if ! is_true "${CSV_OUTPUT:-true}"; then

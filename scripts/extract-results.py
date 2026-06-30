@@ -2,6 +2,7 @@
 import argparse
 import csv
 import json
+import math
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -35,6 +36,11 @@ KUBELET_STARTUP_METRICS = [
 KUBELET_METRIC_FAMILIES = {metric["metricFamily"] for metric in KUBELET_STARTUP_METRICS}
 KUBELET_METRIC_NAME_TO_FAMILY = {metric["metricName"]: metric["metricFamily"] for metric in KUBELET_STARTUP_METRICS}
 ENVIRONMENT_CSV_FIELDS = ["node_pool", "vm_sku", "kernel_version", "containerd_version", "kubelet_version", "kata_version"]
+KUBELET_DIRECT_QUANTILE_METRICS = {
+    f"{metric['metricName']}{quantile}": (metric["metricFamily"], quantile)
+    for metric in KUBELET_STARTUP_METRICS
+    for quantile in REQUIRED_QUANTILES
+}
 
 
 def iter_json_values(path):
@@ -68,7 +74,7 @@ def collect_records(input_dir):
         for value in iter_json_values(path):
             if isinstance(value, dict) and value.get("metricName") == "podLatencyQuantilesMeasurement":
                 pod_records.append(value)
-            elif isinstance(value, dict) and kubelet_metric_family(value) in KUBELET_METRIC_FAMILIES:
+            elif isinstance(value, dict) and is_kubelet_metric_record(value):
                 kubelet_records.append(value)
     return pod_records, kubelet_records
 
@@ -111,6 +117,12 @@ def kubelet_metric_labels(record):
     return labels
 
 
+def is_kubelet_metric_record(record):
+    if record.get("metricName") in KUBELET_DIRECT_QUANTILE_METRICS:
+        return True
+    return kubelet_metric_family(record) in KUBELET_METRIC_FAMILIES
+
+
 def kubelet_metric_family(record):
     name = kubelet_metric_labels(record).get("__name__")
     if isinstance(name, str):
@@ -135,9 +147,12 @@ def kubelet_metric_value(record):
             value = value[1]
         if value is not None:
             try:
-                return float(value)
+                numeric_value = float(value)
             except (TypeError, ValueError):
                 raise SystemExit(f"kubelet metric record has non-numeric value: {value!r}")
+            if not math.isfinite(numeric_value):
+                raise SystemExit(f"kubelet metric value must be finite: {value!r}")
+            return numeric_value
     raise SystemExit("kubelet metric record is missing a numeric value")
 
 
@@ -158,6 +173,10 @@ def parse_timestamp(value):
     if not isinstance(value, str) or not value:
         return ""
     return value
+
+
+def latest_record(records):
+    return max(enumerate(records), key=lambda item: (parse_timestamp(item[1].get("timestamp")), item[0]))[1]
 
 
 def kubelet_series_key(record):
@@ -234,33 +253,90 @@ def histogram_quantile(metric_family, quantile_name, quantile, buckets):
     return clean_float(finite_buckets[-1][0])
 
 
-def build_kubelet_metric_quantiles(records, runtime_key=None, expected_keys=None, required=False):
-    records_by_family = {metric["metricFamily"]: [] for metric in KUBELET_STARTUP_METRICS}
+def prometheus_attribution_map(runtime_manifest):
+    label_key = None
+    by_key = {}
+    seen_values = {}
+    for runtime in runtime_manifest:
+        key = runtime["key"]
+        attribution = runtime.get("prometheusAttribution")
+        if not isinstance(attribution, dict):
+            raise SystemExit(f"runtime {key} must declare prometheusAttribution")
+        current_label_key = attribution.get("labelKey")
+        label_value = attribution.get("labelValue")
+        if not isinstance(current_label_key, str) or not current_label_key:
+            raise SystemExit(f"runtime {key} must declare a Prometheus attribution labelKey")
+        if not isinstance(label_value, str) or not label_value:
+            raise SystemExit(f"runtime {key} must declare a Prometheus attribution labelValue")
+        if label_key is None:
+            label_key = current_label_key
+        elif current_label_key != label_key:
+            raise SystemExit("runtime manifest must use one Prometheus attribution label key")
+        if label_value in seen_values:
+            raise SystemExit(
+                f"duplicate Prometheus runtime attribution value {label_value!r} for {seen_values[label_value]} and {key}"
+            )
+        seen_values[label_value] = key
+        by_key[key] = {"labelKey": current_label_key, "labelValue": label_value}
+    return label_key, by_key
+
+
+def direct_kubelet_quantile(record):
+    metric_name = record.get("metricName")
+    if metric_name in KUBELET_DIRECT_QUANTILE_METRICS:
+        return KUBELET_DIRECT_QUANTILE_METRICS[metric_name]
+    return None
+
+
+def record_prometheus_attribution_value(record, label_key, metric_family):
+    labels = kubelet_metric_labels(record)
+    value = labels.get(label_key)
+    if not isinstance(value, str) or not value:
+        raise SystemExit(f"kubelet metric record is missing Prometheus runtime attribution {label_key!r} for {metric_family}")
+    return value
+
+
+def build_kubelet_metric_quantiles(records, runtime_key=None, expected_keys=None, required=False, attribution=None):
+    attribution = attribution or {}
+    records_by_quantile = {
+        metric["metricFamily"]: {quantile: [] for quantile in REQUIRED_QUANTILES} for metric in KUBELET_STARTUP_METRICS
+    }
     for record in records:
-        if runtime_key is not None and record_runtime_key(record, expected_keys, "kubelet metric") != runtime_key:
+        direct_quantile = direct_kubelet_quantile(record)
+        if direct_quantile is None:
             continue
-        family = kubelet_metric_family(record)
-        if family not in records_by_family or not kubelet_metric_is_bucket(record, family):
+        family, quantile_name = direct_quantile
+        if runtime_key is not None:
+            attribution_value = record_prometheus_attribution_value(record, attribution["labelKey"], family)
+            if attribution_value != attribution["labelValue"]:
+                continue
+        elif attribution:
+            record_prometheus_attribution_value(record, attribution["labelKey"], family)
+        if family not in records_by_quantile:
             continue
-        records_by_family[family].append(record)
+        records_by_quantile[family][quantile_name].append(record)
 
     missing = []
     quantiles = []
     for metric in KUBELET_STARTUP_METRICS:
         family = metric["metricFamily"]
-        family_records = records_by_family[family]
-        if not family_records:
-            missing.append(f"{runtime_key}: {family}" if runtime_key else family)
+        values = {}
+        for quantile_name in REQUIRED_QUANTILES:
+            quantile_records = records_by_quantile[family][quantile_name]
+            if not quantile_records:
+                missing.append(f"{runtime_key}: {family} {quantile_name}" if runtime_key else f"{family} {quantile_name}")
+                continue
+            values[quantile_name] = clean_float(kubelet_metric_value(latest_record(quantile_records)))
+        if any(quantile_name not in values for quantile_name in REQUIRED_QUANTILES):
             continue
-        buckets = reduce_histogram_buckets(family_records)
         quantiles.append(
             {
                 "metricName": metric["metricName"],
                 "metricFamily": family,
                 "unit": metric["unit"],
-                "P50": histogram_quantile(family, "P50", 0.50, buckets),
-                "P95": histogram_quantile(family, "P95", 0.95, buckets),
-                "P99": histogram_quantile(family, "P99", 0.99, buckets),
+                "P50": values["P50"],
+                "P95": values["P95"],
+                "P99": values["P99"],
             }
         )
 
@@ -270,13 +346,15 @@ def build_kubelet_metric_quantiles(records, runtime_key=None, expected_keys=None
     return quantiles
 
 
-def validate_kubelet_metric_runtime_attribution(records, expected_keys):
+def validate_kubelet_metric_runtime_attribution(records, expected_keys, label_key, expected_values):
     for record in records:
-        family = kubelet_metric_family(record)
-        if family not in KUBELET_METRIC_FAMILIES or not kubelet_metric_is_bucket(record, family):
+        direct_quantile = direct_kubelet_quantile(record)
+        if direct_quantile is None:
             continue
-        if record_runtime_key(record, expected_keys, "kubelet metric") is None:
-            raise SystemExit(f"kubelet metric record is missing runtime metadata for {family}")
+        family, _quantile_name = direct_quantile
+        attribution_value = record_prometheus_attribution_value(record, label_key, family)
+        if attribution_value not in expected_values:
+            raise SystemExit(f"kubelet metric record references unknown Prometheus runtime attribution: {attribution_value}")
 
 
 def build_runtime_quantiles(records, runtime_key, expected_keys=None):
@@ -337,6 +415,7 @@ def load_runtime_manifest(path):
     for runtime in runtimes:
         if not isinstance(runtime, dict) or not runtime.get("key") or not runtime.get("runtimeClass"):
             raise SystemExit(f"runtime manifest {path} contains an invalid runtime entry")
+    prometheus_attribution_map(runtimes)
     return runtimes
 
 
@@ -388,8 +467,12 @@ def environment_csv_values(run):
 
 def build_suite_summary(records, kubelet_records, input_dir, run_id, runtime_manifest, environment_metadata=None):
     expected_keys = {runtime["key"] for runtime in runtime_manifest}
+    attribution_label_key, attribution_by_key = prometheus_attribution_map(runtime_manifest)
+    expected_attribution_values = {value["labelValue"] for value in attribution_by_key.values()}
     keyed_records = [record for record in records if record_runtime_key(record, expected_keys) is not None]
-    validate_kubelet_metric_runtime_attribution(kubelet_records, expected_keys)
+    validate_kubelet_metric_runtime_attribution(
+        kubelet_records, expected_keys, attribution_label_key, expected_attribution_values
+    )
     use_keyed_records = bool(keyed_records)
     if use_keyed_records and len(keyed_records) != len(records):
         raise SystemExit("mixed keyed and unkeyed pod latency records found; cannot safely separate runtime results")
@@ -400,7 +483,9 @@ def build_suite_summary(records, kubelet_records, input_dir, run_id, runtime_man
         key = runtime["key"]
         runtime_records = records if not use_keyed_records else keyed_records
         quantiles = build_runtime_quantiles(runtime_records, key if use_keyed_records else None, expected_keys)
-        kubelet_metric_quantiles = build_kubelet_metric_quantiles(kubelet_records, key, expected_keys, required=True)
+        kubelet_metric_quantiles = build_kubelet_metric_quantiles(
+            kubelet_records, key, expected_keys, required=True, attribution=attribution_by_key[key]
+        )
         run = {
             "runtimeKey": key,
             "runtimeClass": runtime["runtimeClass"],

@@ -136,7 +136,9 @@ else
 fi
 
 ensure_cluster
+ensure_nodepool "$STANDARD_NODEPOOL_NAME" "$STANDARD_NODE_LABELS" "$STANDARD_NODE_TAINTS" "$STANDARD_NODEPOOL_EXTRA_ARGS"
 ensure_nodepool "$KATA_NODEPOOL_NAME" "$KATA_NODE_LABELS" "$KATA_NODE_TAINTS" "$KATA_NODEPOOL_EXTRA_ARGS"
+ensure_nodepool "$KATA_OPTIMIZED_NODEPOOL_NAME" "$KATA_OPTIMIZED_NODE_LABELS" "$KATA_OPTIMIZED_NODE_TAINTS" "$KATA_OPTIMIZED_NODEPOOL_EXTRA_ARGS"
 ensure_nodepool "$GVISOR_NODEPOOL_NAME" "$GVISOR_NODE_LABELS" "$GVISOR_NODE_TAINTS" "$GVISOR_NODEPOOL_EXTRA_ARGS"
 ensure_nodepool "$FIRECRACKER_NODEPOOL_NAME" "$FIRECRACKER_NODE_LABELS" "$FIRECRACKER_NODE_TAINTS" "$FIRECRACKER_NODEPOOL_EXTRA_ARGS"
 
@@ -144,7 +146,9 @@ if ! is_true "${DRY_RUN:-0}"; then
   run_cmd az aks update --resource-group "$RESOURCE_GROUP" --name "$CLUSTER_NAME" --yes
   run_cmd az aks get-credentials --resource-group "$RESOURCE_GROUP" --name "$CLUSTER_NAME" --overwrite-existing
   verify_nodepool_count "$SYSTEM_NODEPOOL_NAME" 2
+  verify_nodepool_count "$STANDARD_NODEPOOL_NAME" 1
   verify_nodepool_count "$KATA_NODEPOOL_NAME" 1
+  verify_nodepool_count "$KATA_OPTIMIZED_NODEPOOL_NAME" 1
   verify_nodepool_count "$GVISOR_NODEPOOL_NAME" 1
   verify_nodepool_count "$FIRECRACKER_NODEPOOL_NAME" 1
   run_cmd "$SCRIPT_DIR/bootstrap-cluster.sh"

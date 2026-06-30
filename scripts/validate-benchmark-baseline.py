@@ -2,6 +2,7 @@
 import argparse
 import csv
 import json
+import re
 from pathlib import Path
 
 
@@ -99,6 +100,34 @@ def assert_runtime_manifest(path, expected_runtimes):
     require(isinstance(runtimes, list), f"{path} must contain a runtimes array")
     actual = {runtime.get("key"): runtime.get("runtimeClass") for runtime in runtimes}
     require(actual == expected_runtimes, f"runtime manifest is {actual!r}, expected {expected_runtimes!r}")
+    label_keys = set()
+    label_values = {}
+    for runtime in runtimes:
+        key = runtime.get("key")
+        attribution = runtime.get("prometheusAttribution")
+        require(isinstance(attribution, dict), f"runtime {key!r} must declare prometheusAttribution")
+        label_key = attribution.get("labelKey")
+        label_value = attribution.get("labelValue")
+        require(label_key == "runtimeclass", f"runtime {key!r} attribution label key is {label_key!r}, expected 'runtimeclass'")
+        require(label_value == key, f"runtime {key!r} attribution label value is {label_value!r}, expected {key!r}")
+        label_keys.add(label_key)
+        require(label_value not in label_values, f"duplicate Prometheus attribution label value {label_value!r}")
+        label_values[label_value] = key
+    require(label_keys == {"runtimeclass"}, f"runtime attribution label keys are {label_keys!r}, expected {{'runtimeclass'}}")
+
+
+def assert_suite_attribution_matches_manifest(source_config_text, manifest_path):
+    manifest = read_json(manifest_path)
+    expected = {
+        runtime["key"]: runtime["prometheusAttribution"]["labelValue"] for runtime in manifest.get("runtimes", [])
+    }
+    blocks = re.findall(r"runtimeKey: \"([^\"]+)\"(?P<body>.*?)(?=\n\s+runtimeKey:|\n\s+- name:|\Z)", source_config_text, re.S)
+    actual = {}
+    for key, body in blocks:
+        match = re.search(r"nodeSelector:\s*\n\s+runtimeclass: \"([^\"]+)\"", body)
+        require(match is not None, f"suite runtime {key!r} must include runtimeclass node selector")
+        actual[key] = match.group(1)
+    require(actual == expected, f"suite runtime selectors are {actual!r}, expected manifest attribution {expected!r}")
 
 
 def assert_environment_metadata(path, expected_runtimes):
@@ -116,9 +145,9 @@ def assert_environment_metadata(path, expected_runtimes):
     )
     require(
         metadata.get("runtimeNodePools") == {
-            "standard": "sys",
+            "standard": "standard",
             "kata": "kata",
-            "kata-optimized": "kata",
+            "kata-optimized": "kataopt",
             "gvisor": "gvisor",
             "firecracker": "firecracker",
         },
@@ -167,7 +196,10 @@ def assert_prometheus_inputs(manifest_path, metrics_profile_path, source_config_
     metrics_profile_text = metrics_profile_path.read_text(encoding="utf-8")
     for family in required_metric_families:
         require(family in metrics_profile_text, f"kube-burner metrics profile must query {family}")
-    require("machine_info" in metrics_profile_text, "kube-burner metrics profile must query machine_info")
+    require("histogram_quantile(" in metrics_profile_text, "kube-burner metrics profile must use Prometheus histogram_quantile")
+    require("sum by (le, runtimeclass)" in metrics_profile_text, "kube-burner metrics profile must group by runtimeclass")
+    for quantile in ["0.50", "0.95", "0.99"]:
+        require(quantile in metrics_profile_text, f"kube-burner metrics profile must query quantile {quantile}")
 
     require("__PROMETHEUS_ENDPOINT__" in source_config_text, "static suite config must include the Prometheus endpoint placeholder")
     require("__PROMETHEUS_METRICS_CONFIG__" in source_config_text, "static suite config must include the Prometheus metrics profile placeholder")
@@ -202,10 +234,6 @@ def main():
         "gvisor": "gvisor",
         "firecracker": "kata-fc",
     }
-    runtime_dirs = {key: run_dir / "runs" / key for key in expected_runtimes}
-
-    require(not any(path.exists() for path in runtime_dirs.values()), "suite benchmark must not create per-runtime result directories")
-
     rendered_config = run_dir / "kube-burner.yml"
     runtime_manifest = run_dir / "runtime-manifest.json"
     environment_metadata = run_dir / "environment-metadata.json"
@@ -214,6 +242,7 @@ def main():
     require(rendered_config.is_file(), f"missing file: {rendered_config}")
     require(runtime_manifest.is_file(), f"missing file: {runtime_manifest}")
     require(environment_metadata.is_file(), f"missing file: {environment_metadata}")
+    require((run_dir / "runtime-keys.txt").read_text(encoding="utf-8").splitlines() == list(expected_runtimes), "runtime keys file must preserve manifest runtime order")
     source_config_text = args.suite_config.read_text(encoding="utf-8")
     require("__METRICS_DIR__" in source_config_text, "static suite config must include the metrics directory placeholder")
     config_text = rendered_config.read_text(encoding="utf-8")
@@ -237,11 +266,25 @@ def main():
     require('runtimeClass: "kata-optimized"' in config_text, "optimized Kata job must include runtimeClass")
     require('runtimeClass: "gvisor"' in config_text, "gVisor job must include runtimeClass")
     require('runtimeClass: "kata-fc"' in config_text, "Firecracker job must include runtimeClass")
-    require(config_text.count('runtimeclass: "kata"') >= 2, "Kata jobs must include node selectors")
+    require('runtimeclass: "standard"' in config_text, "standard job must include dedicated node selector")
+    require('value: "standard"' in config_text, "standard job must include dedicated toleration")
+    require('runtimeclass: "kata"' in config_text, "Kata job must include node selector")
+    require('runtimeclass: "kata-optimized"' in config_text, "optimized Kata job must include distinct node selector")
     require('runtimeclass: "gvisor"' in config_text, "gVisor job must include node selector")
     require('runtimeclass: "firecracker"' in config_text, "Firecracker job must include node selector")
-    require(config_text.count('key: "runtimeclass"') >= 4, "runtime jobs must include tolerations")
+    require(config_text.count('key: "runtimeclass"') >= 5, "runtime jobs must include tolerations")
     require("runtimeClassName" not in config_text, "rendered config should not contain pod runtimeClassName directly")
+    for key in expected_runtimes:
+        runtime_config = run_dir / "kube-burner" / f"{key}.yml"
+        runtime_metrics_profile = run_dir / "prometheus-metrics" / f"{key}.yml"
+        require(runtime_config.is_file(), f"missing per-runtime kube-burner config: {runtime_config}")
+        require(runtime_metrics_profile.is_file(), f"missing per-runtime Prometheus metrics profile: {runtime_metrics_profile}")
+        runtime_config_text = runtime_config.read_text(encoding="utf-8")
+        runtime_metrics_text = runtime_metrics_profile.read_text(encoding="utf-8")
+        require(f"name: runtimeclass-pod-latency-{key}" in runtime_config_text, f"{runtime_config} must include only runtime {key!r}")
+        require(str(runtime_metrics_profile) in runtime_config_text, f"{runtime_config} must reference {runtime_metrics_profile}")
+        require("__PROMETHEUS_RUNTIMECLASS__" not in runtime_metrics_text, f"{runtime_metrics_profile} must replace runtime placeholder")
+        require(f'runtimeclass="{key}"' in runtime_metrics_text, f"{runtime_metrics_profile} must filter to runtime {key!r}")
 
     assert_prometheus_inputs(
         args.prometheus_manifest,
@@ -254,6 +297,7 @@ def main():
     assert_runtime_manifest(args.source_manifest, expected_runtimes)
     assert_runtime_manifest(runtime_manifest, expected_runtimes)
     assert_environment_metadata(environment_metadata, expected_runtimes)
+    assert_suite_attribution_matches_manifest(source_config_text, args.source_manifest)
 
     template_text = args.pod_template.read_text(encoding="utf-8")
     require(

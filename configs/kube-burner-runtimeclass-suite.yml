@@ -40,9 +40,12 @@ jobs:
           cpuLimit: "100m"
           memoryLimit: "128Mi"
           nodeSelector:
-            {}
+            runtimeclass: "standard"
           tolerations:
-            []
+            - effect: "NoSchedule"
+              key: "runtimeclass"
+              operator: "Equal"
+              value: "standard"
   - name: runtimeclass-pod-latency-kata
     jobIterations: 35
     qps: 20
@@ -99,12 +102,12 @@ jobs:
           cpuLimit: "100m"
           memoryLimit: "128Mi"
           nodeSelector:
-            runtimeclass: "kata"
+            runtimeclass: "kata-optimized"
           tolerations:
             - effect: "NoSchedule"
               key: "runtimeclass"
               operator: "Equal"
-              value: "kata"
+              value: "kata-optimized"
   - name: runtimeclass-pod-latency-gvisor
     jobIterations: 35
     qps: 20

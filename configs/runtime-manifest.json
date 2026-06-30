@@ -2,23 +2,43 @@
   "runtimes": [
     {
       "key": "standard",
-      "runtimeClass": "standard"
+      "runtimeClass": "standard",
+      "prometheusAttribution": {
+        "labelKey": "runtimeclass",
+        "labelValue": "standard"
+      }
     },
     {
       "key": "kata",
-      "runtimeClass": "kata-vm-isolation"
+      "runtimeClass": "kata-vm-isolation",
+      "prometheusAttribution": {
+        "labelKey": "runtimeclass",
+        "labelValue": "kata"
+      }
     },
     {
       "key": "kata-optimized",
-      "runtimeClass": "kata-optimized"
+      "runtimeClass": "kata-optimized",
+      "prometheusAttribution": {
+        "labelKey": "runtimeclass",
+        "labelValue": "kata-optimized"
+      }
     },
     {
       "key": "gvisor",
-      "runtimeClass": "gvisor"
+      "runtimeClass": "gvisor",
+      "prometheusAttribution": {
+        "labelKey": "runtimeclass",
+        "labelValue": "gvisor"
+      }
     },
     {
       "key": "firecracker",
-      "runtimeClass": "kata-fc"
+      "runtimeClass": "kata-fc",
+      "prometheusAttribution": {
+        "labelKey": "runtimeclass",
+        "labelValue": "firecracker"
+      }
     }
   ]
 }

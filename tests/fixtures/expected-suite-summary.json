@@ -37,6 +37,28 @@
         "kataVersion": null,
         "kernelVersion": "5.15.0-1092-azure",
         "kubeletVersion": "v1.31.8",
+        "name": "standard",
+        "nodes": [
+          "aks-standard-00000000-vmss000000"
+        ],
+        "vmSku": "Standard_D8s_v5"
+      },
+      {
+        "containerdVersion": "containerd://1.7.27",
+        "kataVersion": "3.17.0",
+        "kernelVersion": "5.15.0-1092-azure",
+        "kubeletVersion": "v1.31.8",
+        "name": "kataopt",
+        "nodes": [
+          "aks-kataopt-00000000-vmss000000"
+        ],
+        "vmSku": "Standard_D8s_v5"
+      },
+      {
+        "containerdVersion": "containerd://1.7.27",
+        "kataVersion": null,
+        "kernelVersion": "5.15.0-1092-azure",
+        "kubeletVersion": "v1.31.8",
         "name": "gvisor",
         "nodes": [
           "aks-gvisor-00000000-vmss000000"
@@ -59,8 +81,8 @@
       "firecracker": "firecracker",
       "gvisor": "gvisor",
       "kata": "kata",
-      "kata-optimized": "kata",
-      "standard": "sys"
+      "kata-optimized": "kataopt",
+      "standard": "standard"
     },
     "schemaVersion": "runtimeclass-benchmark-environment/v1",
     "warnings": [
@@ -68,7 +90,7 @@
       "runtime firecracker: Kata runtime version unavailable"
     ]
   },
-  "generatedAt": "2026-06-29T17:23:05.369225+00:00",
+  "generatedAt": "<generatedAt>",
   "runId": "fixture",
   "runs": [
     {
@@ -77,9 +99,9 @@
         "kataVersion": null,
         "kernelVersion": "5.15.0-1092-azure",
         "kubeletVersion": "v1.31.8",
-        "nodePool": "sys",
+        "nodePool": "standard",
         "nodes": [
-          "aks-sys-00000000-vmss000000"
+          "aks-standard-00000000-vmss000000"
         ],
         "vmSku": "Standard_D8s_v5"
       },
@@ -144,7 +166,7 @@
       "runId": "fixture-standard",
       "runtimeClass": "standard",
       "runtimeKey": "standard",
-      "sourceDirectory": "tests/fixtures/kube-burner-suite-metrics"
+      "sourceDirectory": "<sourceDirectory>"
     },
     {
       "environment": {
@@ -219,7 +241,7 @@
       "runId": "fixture-kata",
       "runtimeClass": "kata-vm-isolation",
       "runtimeKey": "kata",
-      "sourceDirectory": "tests/fixtures/kube-burner-suite-metrics"
+      "sourceDirectory": "<sourceDirectory>"
     },
     {
       "environment": {
@@ -227,9 +249,9 @@
         "kataVersion": "3.17.0",
         "kernelVersion": "5.15.0-1092-azure",
         "kubeletVersion": "v1.31.8",
-        "nodePool": "kata",
+        "nodePool": "kataopt",
         "nodes": [
-          "aks-kata-00000000-vmss000000"
+          "aks-kataopt-00000000-vmss000000"
         ],
         "vmSku": "Standard_D8s_v5"
       },
@@ -294,7 +316,7 @@
       "runId": "fixture-kata-optimized",
       "runtimeClass": "kata-optimized",
       "runtimeKey": "kata-optimized",
-      "sourceDirectory": "tests/fixtures/kube-burner-suite-metrics"
+      "sourceDirectory": "<sourceDirectory>"
     },
     {
       "environment": {
@@ -369,7 +391,7 @@
       "runId": "fixture-gvisor",
       "runtimeClass": "gvisor",
       "runtimeKey": "gvisor",
-      "sourceDirectory": "tests/fixtures/kube-burner-suite-metrics"
+      "sourceDirectory": "<sourceDirectory>"
     },
     {
       "environment": {
@@ -444,8 +466,8 @@
       "runId": "fixture-firecracker",
       "runtimeClass": "kata-fc",
       "runtimeKey": "firecracker",
-      "sourceDirectory": "tests/fixtures/kube-burner-suite-metrics"
+      "sourceDirectory": "<sourceDirectory>"
     }
   ],
-  "sourceDirectory": "tests/fixtures/kube-burner-suite-metrics"
+  "sourceDirectory": "<sourceDirectory>"
 }

@@ -25,7 +25,7 @@ make cluster-delete RESOURCE_GROUP=rg-aks-rc-bench CLUSTER_NAME=aks-rc-bench
 
 Use `make benchmark-dry-run` to prepare the result-local kube-burner suite config and print the kube-burner command without contacting a cluster. By default, `make benchmark` runs the checked-in static suite from `configs/kube-burner-runtimeclass-suite.yml`, which includes the standard runtime baseline plus the Kata, optimized Kata, gVisor, and Firecracker-backed Kata runtime entries in one kube-burner invocation.
 
-`make bootstrap-cluster` installs the repository-managed Prometheus manifests after applying the optimized Kata RuntimeClass and waits for the Prometheus deployment rollout. Prometheus is exposed as an in-cluster ClusterIP service, so the default local kube-burner workflow expects `make prometheus-port-forward` to be running in another terminal before `make benchmark`. For a one-command local run, use `make benchmark-with-port-forward`; it starts the Prometheus port-forward, waits for the endpoint to answer, runs the benchmark, and stops the port-forward when the benchmark exits.
+`make bootstrap-cluster` installs the repository-managed Prometheus manifests after applying the optimized Kata RuntimeClass and waits for the Prometheus deployment rollout. Prometheus is exposed as an in-cluster ClusterIP service, so the default local kube-burner workflow expects `make prometheus-port-forward` to be running in another terminal before `make benchmark`. For a one-command local run, use `make benchmark-with-port-forward`; it starts the Prometheus port-forward, waits for the endpoint to answer, runs the benchmark, and stops the port-forward when the benchmark exits. Runtime-attributed kubelet quantiles require the default dedicated runtime node pools; do not schedule unrelated workloads onto these pools during a benchmark run.
 
 ## Important Make Variables
 
@@ -43,10 +43,10 @@ Azure lifecycle variables:
 Node pool variables:
 
 - `SYSTEM_NODEPOOL_NAME`: System node pool name. Default: `sys`; node count is fixed at 2.
-- `KATA_NODEPOOL_NAME`, `GVISOR_NODEPOOL_NAME`, `FIRECRACKER_NODEPOOL_NAME`: Runtime node pool names; node count is fixed at 1 each.
-- `KATA_NODE_LABELS`, `GVISOR_NODE_LABELS`, `FIRECRACKER_NODE_LABELS`: Space-separated labels applied to runtime pools.
-- `KATA_NODE_TAINTS`, `GVISOR_NODE_TAINTS`, `FIRECRACKER_NODE_TAINTS`: Space-separated taints applied to runtime pools. Set to empty to disable taints.
-- `KATA_NODEPOOL_EXTRA_ARGS`, `GVISOR_NODEPOOL_EXTRA_ARGS`, `FIRECRACKER_NODEPOOL_EXTRA_ARGS`: Extra words appended to each runtime `az aks nodepool add` command. Kata defaults to `--workload-runtime KataVmIsolation`.
+- `STANDARD_NODEPOOL_NAME`, `KATA_NODEPOOL_NAME`, `KATA_OPTIMIZED_NODEPOOL_NAME`, `GVISOR_NODEPOOL_NAME`, `FIRECRACKER_NODEPOOL_NAME`: Runtime node pool names; node count is fixed at 1 each.
+- `STANDARD_NODE_LABELS`, `KATA_NODE_LABELS`, `KATA_OPTIMIZED_NODE_LABELS`, `GVISOR_NODE_LABELS`, `FIRECRACKER_NODE_LABELS`: Space-separated labels applied to runtime pools. Defaults use one shared Prometheus attribution key, `runtimeclass`, with distinct values for each runtime entry.
+- `STANDARD_NODE_TAINTS`, `KATA_NODE_TAINTS`, `KATA_OPTIMIZED_NODE_TAINTS`, `GVISOR_NODE_TAINTS`, `FIRECRACKER_NODE_TAINTS`: Space-separated taints applied to runtime pools. Set to empty to disable taints, but doing so increases contamination risk from unrelated pods.
+- `STANDARD_NODEPOOL_EXTRA_ARGS`, `KATA_NODEPOOL_EXTRA_ARGS`, `KATA_OPTIMIZED_NODEPOOL_EXTRA_ARGS`, `GVISOR_NODEPOOL_EXTRA_ARGS`, `FIRECRACKER_NODEPOOL_EXTRA_ARGS`: Extra words appended to each runtime `az aks nodepool add` command. Kata and optimized Kata default to `--workload-runtime KataVmIsolation`.
 - `KATA_OPTIMIZED_RUNTIME_CLASS`: Custom RuntimeClass applied by `make bootstrap-cluster`. Default: `kata-optimized`. If you override this, update `configs/kube-burner-runtimeclass-suite.yml` and `configs/runtime-manifest.json` to use the same runtime class name before benchmarking.
 - `KATA_OPTIMIZED_RUNTIME_OVERHEAD_MEMORY`: Fixed pod memory overhead for the optimized Kata RuntimeClass. Default: `32Mi`.
 - `GVISOR_RUNTIME_CLASS`: Repository-managed gVisor RuntimeClass applied by `make bootstrap-cluster`. Default: `gvisor`.
@@ -85,14 +85,15 @@ The default runtime keys are:
 
 - `standard`: Standard-runtime baseline with no `runtimeClassName`.
 - `kata`: Kata runtime benchmark with runtime class, selector, and toleration defined in `configs/kube-burner-runtimeclass-suite.yml`.
-- `kata-optimized`: Custom Kata runtime benchmark using `runtimeClassName: kata-optimized`, handler `kata`, and `overhead.podFixed.memory: 32Mi`; it reuses the Kata node selector and toleration.
+- `kata-optimized`: Custom Kata runtime benchmark using `runtimeClassName: kata-optimized`, handler `kata`, and `overhead.podFixed.memory: 32Mi`; it uses a dedicated optimized-Kata node selector and toleration.
 - `gvisor`: gVisor benchmark using `runtimeClassName: gvisor`, handler `runsc`, and the gVisor node selector and toleration.
 - `firecracker`: Firecracker-backed Kata benchmark using `runtimeClassName: kata-fc`, handler `kata-fc`, and the Firecracker node selector and toleration.
 
 To change runtime topology, edit both checked-in benchmark inputs together:
 
 - Add or remove kube-burner jobs in `configs/kube-burner-runtimeclass-suite.yml`.
-- Add or remove matching runtime entries in `configs/runtime-manifest.json` so the extractor expects the same runtime keys.
+- Add or remove matching runtime entries in `configs/runtime-manifest.json` so the extractor expects the same runtime keys and Prometheus attribution labels.
+- Keep each runtime entry's `prometheusAttribution.labelKey` set to the same label key and each `labelValue` aligned with the suite job's node selector.
 - Keep the `__METRICS_DIR__`, `__PROMETHEUS_ENDPOINT__`, and `__PROMETHEUS_METRICS_CONFIG__` placeholders in the static suite config; `make benchmark` replaces them with the run's raw metrics directory, configured Prometheus endpoint, and metrics profile path.
 
 - `environment-metadata.json`: Result-local environment metadata captured before kube-burner runs. It records the schema version, capture timestamp, metadata source descriptions, runtime-to-node-pool attribution, node pool metadata, and warnings for unavailable optional fields. Node pool and VM SKU come from Kubernetes node labels such as `kubernetes.azure.com/agentpool` and `node.kubernetes.io/instance-type`; kernel version comes from retained Prometheus `machine_info` labels when available; containerd version comes from Kubernetes node status `nodeInfo.containerRuntimeVersion`; kubelet version comes from Kubernetes node status `nodeInfo.kubeletVersion`; Kata version comes from runtime-specific inspection input when available and is otherwise `null` with a warning.
@@ -102,16 +103,20 @@ To change runtime topology, edit both checked-in benchmark inputs together:
 - `runtime-manifest.json`: Copied runtime keys and summary labels used by the extractor.
 - `raw/`: kube-burner local metrics output.
 
-The Prometheus metrics profile queries these kubelet metric families from the configured Prometheus endpoint: `kubelet_run_podsandbox_duration_seconds`, `kubelet_pod_start_sli_duration_seconds`, and `kubelet_pod_start_total_duration_seconds`, including `_bucket`, `_sum`, and `_count` series where present. It also retains `machine_info` so environment metadata capture can use Prometheus-backed kernel labels when available. The extractor derives P50, P95, and P99 duration values from the collected histogram buckets for each runtime entry and writes them under `kubeletMetricQuantiles` in JSON and as `kubelet_metric` rows in CSV.
+The Prometheus metrics profile queries P50, P95, and P99 with `histogram_quantile()` for these kubelet metric families from the configured Prometheus endpoint: `kubelet_run_podsandbox_duration_seconds`, `kubelet_pod_start_sli_duration_seconds`, and `kubelet_pod_start_total_duration_seconds`. Queries group bucket increases with `sum by (le, runtimeclass)` so the direct quantile output is attributed to runtime entries through the dedicated node-pool label. The extractor consumes those direct quantile records and writes them under `kubeletMetricQuantiles` in JSON and as `kubelet_metric` rows in CSV.
+
+For troubleshooting missing, zero-observation, or `NaN` direct quantiles, use `configs/kubelet-startup-raw-buckets.yml` as a diagnostic metrics profile to collect raw `_bucket`, `_sum`, and `_count` series. The raw profile is not the primary summary input; it is intended to confirm scrape coverage, label preservation, and bucket observations when direct `histogram_quantile()` output fails validation.
 
 Each runtime job uses `metricsClosing: afterJobPause` and `jobPause: 20s` so Prometheus has time to scrape at least once after fast jobs complete. Keep this pause longer than the Prometheus scrape interval; otherwise fast runtime jobs can produce zero bucket deltas and the extractor will fail rather than report misleading kubelet metric quantiles.
 
-The extractor fails if any required pod latency condition, kubelet startup metric family, or P50/P95/P99 value is missing or cannot be attributed to exactly one runtime.
+The extractor fails if any required pod latency condition, kubelet startup metric family, or P50/P95/P99 value is missing, non-finite, duplicated, or cannot be attributed to exactly one manifest runtime entry.
+
+The dedicated runtime node pools increase cluster cost and provisioning time because the default topology uses two system nodes plus one node for each runtime entry. This isolation is intentional: it prevents the standard baseline from mixing with system-node activity and prevents `kata` and `kata-optimized` from collapsing into the same kubelet `runtime_handler="kata"` bucket. Keep benchmark pools exclusive while the suite runs; unrelated pods on these pools can contaminate Prometheus quantiles even when labels are present.
 
 ## Manual End-to-End Verification
 
 1. Run `make validate` and confirm the extractor creates `results/validation/summary.json` and `results/validation/summary.csv` from fixture metrics.
-2. Run `make cluster-create` with the target Azure settings. Confirm the command completes and `az aks nodepool list --resource-group <rg> --cluster-name <cluster> --query '[].{name:name,count:count}'` reports `sys=2`, `kata=1`, `gvisor=1`, and `firecracker=1` unless you overrode node pool names.
+2. Run `make cluster-create` with the target Azure settings. Confirm the command completes and `az aks nodepool list --resource-group <rg> --cluster-name <cluster> --query '[].{name:name,count:count}'` reports `sys=2`, `standard=1`, `kata=1`, `kataopt=1`, `gvisor=1`, and `firecracker=1` unless you overrode node pool names.
 3. Run `make bootstrap-cluster` if you need to reapply repository-managed Kubernetes components after cluster credentials are configured. Set `KUBE_CONTEXT=<context>` to target a specific kube context. Confirm `kubectl get runtimeclass kata-optimized -o jsonpath='{.handler}{" "}{.overhead.podFixed.memory}'` prints `kata 32Mi`, and confirm `kubectl get runtimeclass gvisor kata-fc` shows both repository-managed runtime classes. For exact handlers, `kubectl get runtimeclass gvisor -o jsonpath='{.handler}'` should print `runsc` and `kubectl get runtimeclass kata-fc -o jsonpath='{.handler}'` should print `kata-fc`.
 4. Run `make kube-burner-install` and confirm `tools/bin/kube-burner version` works.
 5. Confirm Prometheus is available with `kubectl -n runtimeclass-bench-prometheus rollout status deployment/prometheus --timeout 5m`.
@@ -122,6 +127,8 @@ The extractor fails if any required pod latency condition, kubelet startup metri
 curl -G 'http://127.0.0.1:9090/api/v1/query' --data-urlencode 'query=kubelet_run_podsandbox_duration_seconds_count'
 curl -G 'http://127.0.0.1:9090/api/v1/query' --data-urlencode 'query=kubelet_pod_start_sli_duration_seconds_count'
 curl -G 'http://127.0.0.1:9090/api/v1/query' --data-urlencode 'query=kubelet_pod_start_total_duration_seconds_count'
+curl -G 'http://127.0.0.1:9090/api/v1/query' --data-urlencode 'query=count by (runtimeclass) (kubelet_run_podsandbox_duration_seconds_bucket)'
+curl -G 'http://127.0.0.1:9090/api/v1/query' --data-urlencode 'query=histogram_quantile(0.95, sum by (le, runtimeclass) (increase(kubelet_run_podsandbox_duration_seconds_bucket[5m])))'
 ```
 
 8. Run `make benchmark`.

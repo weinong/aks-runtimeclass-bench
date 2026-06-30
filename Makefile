@@ -16,13 +16,21 @@ CLUSTER_EXTRA_ARGS ?=
 SYSTEM_NODEPOOL_NAME ?= sys
 SYSTEM_OS_SKU ?= AzureLinux
 RUNTIME_OS_SKU ?= AzureLinux
+STANDARD_NODEPOOL_NAME ?= standard
+STANDARD_NODE_LABELS ?= runtimeclass=standard
+STANDARD_NODE_TAINTS ?= runtimeclass=standard:NoSchedule
+STANDARD_NODEPOOL_EXTRA_ARGS ?=
 KATA_NODEPOOL_NAME ?= kata
 KATA_RUNTIME_CLASS ?= kata-vm-isolation
 KATA_NODE_LABELS ?= runtimeclass=kata
 KATA_NODE_TAINTS ?= runtimeclass=kata:NoSchedule
 KATA_NODEPOOL_EXTRA_ARGS ?= --workload-runtime KataVmIsolation
+KATA_OPTIMIZED_NODEPOOL_NAME ?= kataopt
 KATA_OPTIMIZED_RUNTIME_CLASS ?= kata-optimized
 KATA_OPTIMIZED_RUNTIME_OVERHEAD_MEMORY ?= 32Mi
+KATA_OPTIMIZED_NODE_LABELS ?= runtimeclass=kata-optimized
+KATA_OPTIMIZED_NODE_TAINTS ?= runtimeclass=kata-optimized:NoSchedule
+KATA_OPTIMIZED_NODEPOOL_EXTRA_ARGS ?= --workload-runtime KataVmIsolation
 PROMETHEUS_MANIFEST ?= manifests/prometheus/prometheus.yml
 PROMETHEUS_NAMESPACE ?= runtimeclass-bench-prometheus
 PROMETHEUS_SERVICE_NAME ?= prometheus

@@ -13,6 +13,28 @@ spec.loader.exec_module(capture_environment_metadata)
 
 
 class CaptureEnvironmentMetadataTests(unittest.TestCase):
+    def test_default_runtime_node_pool_names_match_dedicated_runtime_pools(self):
+        runtime_manifest = {
+            "runtimes": [
+                {"key": "standard", "runtimeClass": "standard"},
+                {"key": "kata", "runtimeClass": "kata-vm-isolation"},
+                {"key": "kata-optimized", "runtimeClass": "kata-optimized"},
+                {"key": "gvisor", "runtimeClass": "gvisor"},
+                {"key": "firecracker", "runtimeClass": "kata-fc"},
+            ]
+        }
+
+        self.assertEqual(
+            capture_environment_metadata.default_runtime_node_pool_names(runtime_manifest),
+            {
+                "standard": "standard",
+                "kata": "kata",
+                "kata-optimized": "kataopt",
+                "gvisor": "gvisor",
+                "firecracker": "firecracker",
+            },
+        )
+
     def test_build_environment_metadata_from_nodes_and_machine_info(self):
         nodes = {
             "items": [

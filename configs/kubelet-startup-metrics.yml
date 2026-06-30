@@ -1,8 +1,18 @@
-- query: '{__name__=~"kubelet_run_podsandbox_duration_seconds(_bucket|_sum|_count)?"}'
-  metricName: kubeletRunPodSandboxDurationSeconds
-- query: '{__name__=~"kubelet_pod_start_sli_duration_seconds(_bucket|_sum|_count)?"}'
-  metricName: kubeletPodStartSliDurationSeconds
-- query: '{__name__=~"kubelet_pod_start_total_duration_seconds(_bucket|_sum|_count)?"}'
-  metricName: kubeletPodStartTotalDurationSeconds
-- query: 'machine_info'
-  metricName: nodeMachineInfo
+- query: 'histogram_quantile(0.50, sum by (le, runtimeclass) (increase(kubelet_run_podsandbox_duration_seconds_bucket{runtimeclass="__PROMETHEUS_RUNTIMECLASS__"}[{{ .elapsed }}])))'
+  metricName: kubeletRunPodSandboxDurationSecondsP50
+- query: 'histogram_quantile(0.95, sum by (le, runtimeclass) (increase(kubelet_run_podsandbox_duration_seconds_bucket{runtimeclass="__PROMETHEUS_RUNTIMECLASS__"}[{{ .elapsed }}])))'
+  metricName: kubeletRunPodSandboxDurationSecondsP95
+- query: 'histogram_quantile(0.99, sum by (le, runtimeclass) (increase(kubelet_run_podsandbox_duration_seconds_bucket{runtimeclass="__PROMETHEUS_RUNTIMECLASS__"}[{{ .elapsed }}])))'
+  metricName: kubeletRunPodSandboxDurationSecondsP99
+- query: 'histogram_quantile(0.50, sum by (le, runtimeclass) (increase(kubelet_pod_start_sli_duration_seconds_bucket{runtimeclass="__PROMETHEUS_RUNTIMECLASS__"}[{{ .elapsed }}])))'
+  metricName: kubeletPodStartSliDurationSecondsP50
+- query: 'histogram_quantile(0.95, sum by (le, runtimeclass) (increase(kubelet_pod_start_sli_duration_seconds_bucket{runtimeclass="__PROMETHEUS_RUNTIMECLASS__"}[{{ .elapsed }}])))'
+  metricName: kubeletPodStartSliDurationSecondsP95
+- query: 'histogram_quantile(0.99, sum by (le, runtimeclass) (increase(kubelet_pod_start_sli_duration_seconds_bucket{runtimeclass="__PROMETHEUS_RUNTIMECLASS__"}[{{ .elapsed }}])))'
+  metricName: kubeletPodStartSliDurationSecondsP99
+- query: 'histogram_quantile(0.50, sum by (le, runtimeclass) (increase(kubelet_pod_start_total_duration_seconds_bucket{runtimeclass="__PROMETHEUS_RUNTIMECLASS__"}[{{ .elapsed }}])))'
+  metricName: kubeletPodStartTotalDurationSecondsP50
+- query: 'histogram_quantile(0.95, sum by (le, runtimeclass) (increase(kubelet_pod_start_total_duration_seconds_bucket{runtimeclass="__PROMETHEUS_RUNTIMECLASS__"}[{{ .elapsed }}])))'
+  metricName: kubeletPodStartTotalDurationSecondsP95
+- query: 'histogram_quantile(0.99, sum by (le, runtimeclass) (increase(kubelet_pod_start_total_duration_seconds_bucket{runtimeclass="__PROMETHEUS_RUNTIMECLASS__"}[{{ .elapsed }}])))'
+  metricName: kubeletPodStartTotalDurationSecondsP99
