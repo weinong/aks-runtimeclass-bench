@@ -75,14 +75,26 @@ def assert_aggregate_summary(run_dir, expected_runtimes):
     )
 
     rows = read_csv(run_dir / "summary.csv")
+    expected_csv_fields = [
+        "run_id",
+        "runtime_key",
+        "runtime_class",
+        "metric_category",
+        "condition",
+        "metric_name",
+        "metric_family",
+        "unit",
+        "p50",
+        "p95",
+        "p99",
+    ]
+    require(list(rows[0]) == expected_csv_fields, f"aggregate CSV fields are {list(rows[0])!r}, expected {expected_csv_fields!r}")
     row_keys = {row.get("runtime_key") for row in rows}
     require(row_keys == set(expected_runtimes), f"aggregate CSV runtime keys are {row_keys!r}, expected {set(expected_runtimes)!r}")
     for key in expected_runtimes:
         runtime_rows = [row for row in rows if row.get("runtime_key") == key]
         pod_rows = [row for row in runtime_rows if row.get("metric_category") == "pod_latency"]
         kubelet_rows = [row for row in runtime_rows if row.get("metric_category") == "kubelet_metric"]
-        for field in ["node_pool", "vm_sku", "kernel_version", "containerd_version", "kubelet_version", "kata_version"]:
-            require(field in rows[0], f"aggregate CSV must include environment metadata column {field!r}")
         require(len(pod_rows) == 5, f"aggregate CSV runtime {key!r} must include 5 pod latency rows")
         actual_families = {row.get("metric_family") for row in kubelet_rows}
         require(
