@@ -73,7 +73,7 @@ RUN_ID ?= runtimeclass-$(shell date -u +%Y%m%dT%H%M%SZ)
 CSV_OUTPUT ?= true
 DRY_RUN ?= 0
 
-.PHONY: help cluster-create bootstrap-cluster cluster-delete kube-burner-install prometheus-port-forward benchmark benchmark-with-port-forward benchmark-dry-run validate validate-make validate-shell validate-config validate-port-forward-targets validate-runtime-install-images test-extract test-capture-metadata validate-benchmark-baseline clean-results
+.PHONY: help cluster-create bootstrap-cluster cluster-delete kube-burner-install prometheus-port-forward benchmark benchmark-direct benchmark-dry-run validate validate-make validate-shell validate-config validate-port-forward-targets validate-runtime-install-images test-extract test-capture-metadata validate-benchmark-baseline clean-results
 
 help:
 	@printf 'AKS runtime class benchmark targets:\n'
@@ -82,9 +82,9 @@ help:
 	@printf '  make cluster-delete        Delete cluster or resource group resources\n'
 	@printf '  make kube-burner-install   Install kube-burner under $(TOOLS_DIR)/\n'
 	@printf '  make prometheus-port-forward  Forward local Prometheus traffic to the in-cluster service\n'
-	@printf '  make benchmark             Run kube-burner and extract JSON/CSV summaries\n'
-	@printf '  make benchmark-with-port-forward  Start Prometheus port-forward, run benchmark, then stop it\n'
-	@printf '  make benchmark-dry-run     Prepare benchmark inputs and print the commands\n'
+	@printf '  make benchmark             Start Prometheus port-forward, run benchmark, then stop it\n'
+	@printf '  make benchmark-direct      Run kube-burner without managing Prometheus port-forward\n'
+	@printf '  make benchmark-dry-run     Dry-run the full benchmark workflow and print the commands\n'
 	@printf '  make validate              Run local syntax, config, and extractor checks\n'
 	@printf '\nCommon overrides:\n'
 	@printf '  RESOURCE_GROUP=%s CLUSTER_NAME=%s LOCATION=%s VM_SIZE=%s\n' '$(RESOURCE_GROUP)' '$(CLUSTER_NAME)' '$(LOCATION)' '$(VM_SIZE)'
@@ -106,10 +106,10 @@ prometheus-port-forward:
 	@scripts/prometheus-port-forward.sh
 
 benchmark:
-	@scripts/run-benchmark.sh
-
-benchmark-with-port-forward:
 	@scripts/run-benchmark-with-port-forward.sh
+
+benchmark-direct:
+	@scripts/run-benchmark.sh
 
 benchmark-dry-run:
 	@$(MAKE) benchmark DRY_RUN=1
@@ -120,6 +120,8 @@ validate-make:
 	@$(MAKE) --dry-run help >/dev/null
 	@$(MAKE) --dry-run bootstrap-cluster DRY_RUN=1 >/dev/null
 	@$(MAKE) --dry-run benchmark DRY_RUN=1 >/dev/null
+	@$(MAKE) --dry-run benchmark DRY_RUN=1 | grep -F 'scripts/run-benchmark-with-port-forward.sh' >/dev/null
+	@$(MAKE) --dry-run benchmark-direct DRY_RUN=1 | grep -F 'scripts/run-benchmark.sh' >/dev/null
 
 validate-shell:
 	@bash -n scripts/*.sh
@@ -138,7 +140,7 @@ validate-port-forward-targets:
 	@test -x scripts/run-benchmark-with-port-forward.sh
 	@$(MAKE) prometheus-port-forward DRY_RUN=1 >/dev/null
 	@rm -rf results/validation-port-forward
-	@$(MAKE) benchmark-with-port-forward DRY_RUN=1 OUTPUT_DIR=results/validation-port-forward RUN_ID=fixture >/dev/null
+	@$(MAKE) benchmark DRY_RUN=1 OUTPUT_DIR=results/validation-port-forward RUN_ID=fixture >/dev/null
 	@rm -rf results/validation-port-forward
 
 validate-runtime-install-images:
@@ -154,7 +156,7 @@ test-capture-metadata:
 validate-benchmark-baseline:
 	@rm -rf results/validation-baseline
 	@mkdir -p results/validation-baseline
-	@$(MAKE) benchmark DRY_RUN=1 OUTPUT_DIR=results/validation-baseline RUN_ID=fixture >/dev/null
+	@$(MAKE) benchmark-direct DRY_RUN=1 OUTPUT_DIR=results/validation-baseline RUN_ID=fixture >/dev/null
 	@cp tests/fixtures/environment-metadata.json results/validation-baseline/fixture/environment-metadata.json
 	@scripts/extract-results.py tests/fixtures/kube-burner-suite-metrics --output-dir results/validation-baseline/fixture --run-id fixture --runtime-manifest results/validation-baseline/fixture/runtime-manifest.json --environment-metadata results/validation-baseline/fixture/environment-metadata.json
 	@python3 scripts/validate-benchmark-baseline.py --output-dir results/validation-baseline --run-id fixture --prometheus-manifest "$(PROMETHEUS_MANIFEST)" --prometheus-metrics-profile "$(KUBE_BURNER_PROMETHEUS_METRICS_CONFIG)" --prometheus-endpoint "$(KUBE_BURNER_PROMETHEUS_ENDPOINT)"
