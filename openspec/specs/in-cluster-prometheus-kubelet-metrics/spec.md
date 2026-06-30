@@ -24,7 +24,7 @@ The benchmark suite SHALL provide repository-managed Kubernetes manifests that i
 - **THEN** the suite prints the Prometheus apply and rollout commands without mutating the cluster
 
 ### Requirement: Kubelet startup metrics scraping
-The in-cluster Prometheus instance SHALL run on the configured system node pool, scrape kubelet metrics from all benchmark cluster nodes including system and runtime-specific node pools, and retain the metric families `kubelet_run_podsandbox_duration_seconds`, `kubelet_pod_start_sli_duration_seconds`, and `kubelet_pod_start_total_duration_seconds`.
+The in-cluster Prometheus instance SHALL run on the configured system node pool, scrape kubelet metrics from all benchmark cluster nodes including system and runtime-specific node pools, retain the metric families `kubelet_run_podsandbox_duration_seconds`, `kubelet_pod_start_sli_duration_seconds`, and `kubelet_pod_start_total_duration_seconds`, and preserve node-pool labels needed to attribute kubelet startup quantile queries to benchmark runtime entries.
 
 #### Scenario: Discover kubelet targets
 - **WHEN** Prometheus runs in the benchmark cluster
@@ -37,6 +37,10 @@ The in-cluster Prometheus instance SHALL run on the configured system node pool,
 #### Scenario: Retain requested kubelet metric families
 - **WHEN** Prometheus stores scraped kubelet samples
 - **THEN** Prometheus retains the full `kubelet_run_podsandbox_duration_seconds`, `kubelet_pod_start_sli_duration_seconds`, and `kubelet_pod_start_total_duration_seconds` metric families, including `_bucket`, `_sum`, and `_count` series where present
+
+#### Scenario: Preserve runtime attribution labels
+- **WHEN** Prometheus stores scraped kubelet bucket samples from a benchmark runtime node pool
+- **THEN** the stored samples include the stable node-pool label key and value declared by the matching runtime manifest entry, with one shared key across runtime entries and distinct values for `standard`, `kata`, `kata-optimized`, `gvisor`, and `firecracker`
 
 ### Requirement: Kube-burner Prometheus access
 The benchmark suite SHALL provide a configurable Prometheus endpoint that kube-burner can use to query the in-cluster Prometheus instance for kubelet startup metrics.
@@ -54,7 +58,7 @@ The benchmark suite SHALL provide a configurable Prometheus endpoint that kube-b
 - **THEN** the suite documents the required local access path for the configured Prometheus endpoint, such as a `kubectl port-forward`
 
 ### Requirement: Prometheus verification guidance
-The benchmark suite SHALL document how operators verify that Prometheus is running and that the requested kubelet metrics are queryable before running the benchmark.
+The benchmark suite SHALL document how operators verify that Prometheus is running, that requested kubelet metrics are queryable, and that runtime attribution labels are present before running the benchmark.
 
 #### Scenario: Verify Prometheus deployment
 - **WHEN** an operator follows the manual verification workflow
@@ -63,3 +67,7 @@ The benchmark suite SHALL document how operators verify that Prometheus is runni
 #### Scenario: Verify kubelet metric queries
 - **WHEN** an operator follows the manual verification workflow
 - **THEN** the workflow includes querying Prometheus for the `kubelet_run_podsandbox_duration_seconds`, `kubelet_pod_start_sli_duration_seconds`, and `kubelet_pod_start_total_duration_seconds` metric families
+
+#### Scenario: Verify runtime attribution labels
+- **WHEN** an operator follows the manual verification workflow
+- **THEN** the workflow includes querying Prometheus to confirm that each configured runtime entry has an unambiguous node-pool label available on the retained kubelet histogram bucket series
