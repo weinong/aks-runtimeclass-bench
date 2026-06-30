@@ -35,7 +35,6 @@ KUBELET_STARTUP_METRICS = [
 ]
 KUBELET_METRIC_FAMILIES = {metric["metricFamily"] for metric in KUBELET_STARTUP_METRICS}
 KUBELET_METRIC_NAME_TO_FAMILY = {metric["metricName"]: metric["metricFamily"] for metric in KUBELET_STARTUP_METRICS}
-ENVIRONMENT_CSV_FIELDS = ["node_pool", "vm_sku", "kernel_version", "containerd_version", "kubelet_version", "kata_version"]
 KUBELET_DIRECT_QUANTILE_METRICS = {
     f"{metric['metricName']}{quantile}": (metric["metricFamily"], quantile)
     for metric in KUBELET_STARTUP_METRICS
@@ -453,18 +452,6 @@ def runtime_environment(environment_metadata, runtime_key):
     }
 
 
-def environment_csv_values(run):
-    environment = run.get("environment") or {}
-    return {
-        "node_pool": environment.get("nodePool") or "",
-        "vm_sku": environment.get("vmSku") or "",
-        "kernel_version": environment.get("kernelVersion") or "",
-        "containerd_version": environment.get("containerdVersion") or "",
-        "kubelet_version": environment.get("kubeletVersion") or "",
-        "kata_version": environment.get("kataVersion") or "",
-    }
-
-
 def build_suite_summary(records, kubelet_records, input_dir, run_id, runtime_manifest, environment_metadata=None):
     expected_keys = {runtime["key"] for runtime in runtime_manifest}
     attribution_label_key, attribution_by_key = prometheus_attribution_map(runtime_manifest)
@@ -540,7 +527,6 @@ def write_suite_csv(summary, path):
                 "metric_name",
                 "metric_family",
                 "unit",
-                *ENVIRONMENT_CSV_FIELDS,
                 "p50",
                 "p95",
                 "p99",
@@ -548,7 +534,6 @@ def write_suite_csv(summary, path):
         )
         writer.writeheader()
         for run in summary["runs"]:
-            environment = environment_csv_values(run)
             for item in run["quantiles"]:
                 writer.writerow(
                     {
@@ -560,7 +545,6 @@ def write_suite_csv(summary, path):
                         "metric_name": "",
                         "metric_family": "",
                         "unit": "",
-                        **environment,
                         "p50": item["P50"],
                         "p95": item["P95"],
                         "p99": item["P99"],
@@ -577,7 +561,6 @@ def write_suite_csv(summary, path):
                         "metric_name": item["metricName"],
                         "metric_family": item["metricFamily"],
                         "unit": item["unit"],
-                        **environment,
                         "p50": item["P50"],
                         "p95": item["P95"],
                         "p99": item["P99"],

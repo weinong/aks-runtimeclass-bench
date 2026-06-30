@@ -13,6 +13,20 @@ EXTRACT_RESULTS = REPO_ROOT / "scripts" / "extract-results.py"
 SUITE_FIXTURE = REPO_ROOT / "tests" / "fixtures" / "kube-burner-suite-metrics"
 RUNTIME_MANIFEST = REPO_ROOT / "configs" / "runtime-manifest.json"
 ENVIRONMENT_METADATA = REPO_ROOT / "tests" / "fixtures" / "environment-metadata.json"
+SUMMARY_CSV_FIELDS = [
+    "run_id",
+    "runtime_key",
+    "runtime_class",
+    "metric_category",
+    "condition",
+    "metric_name",
+    "metric_family",
+    "unit",
+    "p50",
+    "p95",
+    "p99",
+]
+ENVIRONMENT_CSV_FIELDS = ["node_pool", "vm_sku", "kernel_version", "containerd_version", "kubelet_version", "kata_version"]
 
 
 def read_csv(path):
@@ -69,13 +83,9 @@ class ExtractResultsTests(unittest.TestCase):
             self.assertIsNone(by_key["firecracker"]["environment"]["kataVersion"])
 
             rows = read_csv(output_dir / "summary.csv")
-            self.assertEqual(rows[0]["node_pool"], "standard")
-            self.assertEqual(rows[0]["vm_sku"], "Standard_D8s_v5")
-            self.assertEqual(rows[0]["kernel_version"], "5.15.0-1092-azure")
-            self.assertEqual(rows[0]["kubelet_version"], "v1.31.8")
-            firecracker_row = next(row for row in rows if row["runtime_key"] == "firecracker")
-            self.assertEqual(firecracker_row["kernel_version"], "")
-            self.assertEqual(firecracker_row["kata_version"], "")
+            self.assertEqual(list(rows[0]), SUMMARY_CSV_FIELDS)
+            for field in ENVIRONMENT_CSV_FIELDS:
+                self.assertNotIn(field, rows[0])
 
     def test_suite_summary_includes_kubelet_metric_quantiles(self):
         with tempfile.TemporaryDirectory() as tmp:
